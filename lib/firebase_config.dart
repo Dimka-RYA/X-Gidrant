@@ -3,23 +3,23 @@
 
 class FirebaseConfig {
   // Web API Key
-  static const String apiKey = "ЗАПОЛНИТЕ_СВОИМ_API_KEY";
+  static const String apiKey = "AIzaSyBOF_HxpxOCe3uYjMijYTccsTX94HPHpeA";
   
   // Project ID
-  static const String projectId = "ЗАПОЛНИТЕ_СВОИМ_PROJECT_ID";
+  static const String projectId = "x-gidrant";
   
   // Auth domain
-  static const String authDomain = "ЗАПОЛНИТЕ_СВОИМ_AUTH_DOMAIN";
+  static const String authDomain = "x-gidrant.firebaseapp.com";
   
   // Storage bucket
-  static const String storageBucket = "ЗАПОЛНИТЕ_СВОИМ_STORAGE_BUCKET";
+  static const String storageBucket = "x-gidrant.firebasestorage.app";
   
   // Messaging sender ID
-  static const String messagingSenderId = "ЗАПОЛНИТЕ_СВОИМ_MESSAGING_SENDER_ID";
+  static const String messagingSenderId = "553290244816";
   
   // App ID
-  static const String appId = "ЗАПОЛНИТЕ_СВОИМ_APP_ID";
+  static const String appId = "1:553290244816:android:76954338d7605fdaa5b4d5";
   
   // Measurement ID (для Google Analytics)
-  static const String measurementId = "ЗАПОЛНИТЕ_СВОИМ_MEASUREMENT_ID";
+  static const String measurementId = "";
 } 

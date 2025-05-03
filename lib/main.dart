@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_config.dart';
 import 'auth/login_screen.dart';
+import 'auth/register_screen.dart';
+import 'main_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'auth/auth_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  bool firebaseInitialized = false;
   
   try {
     // Проверяем, не инициализирован ли Firebase уже
@@ -29,106 +29,66 @@ void main() async {
     } else {
       Firebase.app(); // Используем уже инициализированное приложение
     }
-    
-    // Проверка корректности конфигурации
-    if (FirebaseConfig.apiKey == "ЗАПОЛНИТЕ_СВОИМ_API_KEY" ||
-        FirebaseConfig.projectId == "ЗАПОЛНИТЕ_СВОИМ_PROJECT_ID") {
-      firebaseInitialized = false;
-      print("ВНИМАНИЕ: Вы не заполнили данные Firebase в файле конфигурации!");
-    } else {
-      firebaseInitialized = true;
-    }
+    print("Firebase успешно инициализирован");
   } catch (e) {
     print("Ошибка инициализации Firebase: $e");
-    firebaseInitialized = false;
   }
   
-  runApp(MainApp(firebaseInitialized: firebaseInitialized));
+  runApp(const MyApp());
 }
 
-class MainApp extends StatelessWidget {
-  final bool firebaseInitialized;
-  
-  const MainApp({super.key, this.firebaseInitialized = false});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'X-Gidrant',
+      title: 'X-Гидрант',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.red),
         useMaterial3: true,
       ),
-      home: firebaseInitialized 
-        ? _buildAuthFlow() 
-        : _buildFirebaseNotConfigured(),
+      home: _getLandingPage(),
+      routes: {
+        '/login': (context) {
+          print('Переход на экран входа');
+          return const LoginScreen();
+        },
+        '/register': (context) {
+          print('Переход на экран регистрации');
+          return const RegisterScreen();
+        },
+        '/main': (context) {
+          print('Переход на главный экран');
+          return const MainScreen();
+        },
+      },
     );
   }
   
-  Widget _buildAuthFlow() {
+  Widget _getLandingPage() {
     return StreamBuilder<User?>(
-      stream: AuthService().user,
+      stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+        // Если подключение активно и у нас есть пользователь
         if (snapshot.connectionState == ConnectionState.active) {
-          final User? user = snapshot.data;
+          User? user = snapshot.data;
           if (user == null) {
-            // Пользователь не авторизован
+            print('Пользователь не авторизован, показываем экран входа');
             return const LoginScreen();
           }
-          // Пользователь авторизован
-          return const HomeScreen();
+          
+          print('Пользователь авторизован (${user.email}), показываем главный экран');
+          return const MainScreen();
         }
-        // Загрузка
+        
+        // Если подключение не установлено, показываем экран загрузки
         return const Scaffold(
           body: Center(
             child: CircularProgressIndicator(),
           ),
         );
       },
-    );
-  }
-  
-  Widget _buildFirebaseNotConfigured() {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('X-Gidrant - Требуется настройка'),
-        backgroundColor: Colors.orange,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.warning_amber_rounded,
-              color: Colors.orange,
-              size: 80,
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Firebase не настроен',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Необходимо заполнить данные Firebase в файле:\n'
-              'lib/firebase_config.dart',
-              style: TextStyle(fontSize: 16),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              '1. Создайте проект в Firebase Console\n'
-              '2. Зарегистрируйте Android приложение\n'
-              '3. Заполните данные из google-services.json\n'
-              '4. Перезапустите приложение',
-              style: TextStyle(fontSize: 16),
-              textAlign: TextAlign.left,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

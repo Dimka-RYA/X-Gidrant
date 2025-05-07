@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
 import 'screens/map_screen.dart';
-import 'screens/history_screen.dart';
+import 'screens/history_screen.dart' as history;
 import 'screens/profile_screen.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -12,10 +13,10 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-  int _selectedIndex = 0; // Выбираем вкладку по умолчанию
+  int _selectedIndex = 3; // Выбираем вкладку Профиль по умолчанию
   // PageController для управления свайпом страниц
   final PageController _pageController = PageController(
-    initialPage: 0,
+    initialPage: 3, // Устанавливаем начальную страницу "Профиль"
     keepPage: true,
     viewportFraction: 1.0,
   );
@@ -23,7 +24,7 @@ class _MainScreenState extends State<MainScreen> {
   // Список экранов для каждой вкладки
   final List<Widget> _screens = [
     const MapScreen(),
-    const HistoryScreen(),
+    const history.HistoryScreen(),
     const HomeScreen(),
     const ProfileScreen(),
   ];
@@ -76,10 +77,10 @@ class _MainScreenState extends State<MainScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _buildNavItem(0, Icons.menu_book, 'Карта'),
-                  _buildNavItem(1, Icons.access_time, 'История'),
-                  _buildNavItem(2, Icons.home_outlined, 'Главная'),
-                  _buildNavItem(3, Icons.person_outline, 'Профиль'),
+                  _buildNavItem(0, 'lib/assets/map1.svg', 'Карта'),
+                  _buildNavItem(1, 'lib/assets/history.svg', 'История'),
+                  _buildNavItem(2, 'lib/assets/home.svg', 'Главная'),
+                  _buildNavItem(3, 'lib/assets/user.svg', 'Профиль'),
                 ],
               ),
             ),
@@ -89,8 +90,10 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
   
-  Widget _buildNavItem(int index, IconData icon, String label) {
+  Widget _buildNavItem(int index, String svgPath, String label) {
     final isSelected = _selectedIndex == index;
+    final accentColor = const Color(0xFFD04E4E);
+    final defaultColor = Colors.white;
     
     return InkWell(
       onTap: () {
@@ -106,7 +109,7 @@ class _MainScreenState extends State<MainScreen> {
           curve: Curves.easeOutQuad,
         );
       },
-      child: Container(
+      child: SizedBox(
         width: 75,
         child: Stack(
           clipBehavior: Clip.none,
@@ -116,19 +119,13 @@ class _MainScreenState extends State<MainScreen> {
             Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                AnimatedDefaultTextStyle(
-                  duration: const Duration(milliseconds: 300),
-                  style: TextStyle(
-                    color: isSelected 
-                      ? const Color(0xFFD04E4E) 
-                      : Colors.white,
-                  ),
-                  child: Icon(
-                    icon,
-                    size: 24,
-                    color: isSelected 
-                      ? const Color(0xFFD04E4E) 
-                      : Colors.white,
+                SvgPicture.asset(
+                  svgPath,
+                  width: 24,
+                  height: 24,
+                  colorFilter: ColorFilter.mode(
+                    isSelected ? accentColor : defaultColor, 
+                    BlendMode.srcIn,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -136,8 +133,8 @@ class _MainScreenState extends State<MainScreen> {
                   duration: const Duration(milliseconds: 300),
                   style: TextStyle(
                     color: isSelected 
-                      ? const Color(0xFFD04E4E) 
-                      : Colors.white,
+                      ? accentColor 
+                      : defaultColor,
                     fontSize: 10,
                   ),
                   child: Text(label),
@@ -156,18 +153,18 @@ class _MainScreenState extends State<MainScreen> {
                 decoration: BoxDecoration(
                   // Используем AnimatedContainer для плавной анимации индикатора
                   color: isSelected 
-                    ? const Color(0xFFD04E4E) 
+                    ? accentColor 
                     : Colors.transparent,
                   // Скругляем по половине высоты для плавных краев
                   // Скругляем только нижние углы, верхние остаются прямыми
-                  borderRadius: BorderRadius.only(
+                  borderRadius: const BorderRadius.only(
                     bottomLeft: Radius.circular(3.5),
                     bottomRight: Radius.circular(3.5),
                   ),
 
                   boxShadow: isSelected ? [
                     BoxShadow(
-                      color: const Color(0xFFD04E4E).withOpacity(0.5),
+                      color: accentColor.withOpacity(0.5),
                       blurRadius: 8,
                       spreadRadius: 2,
                       offset: const Offset(0, 2),
@@ -185,8 +182,7 @@ class _MainScreenState extends State<MainScreen> {
 
 // Кастомная физика для более плавного скроллинга между несмежными вкладками
 class CustomPageViewScrollPhysics extends ScrollPhysics {
-  const CustomPageViewScrollPhysics({ScrollPhysics? parent}) 
-      : super(parent: parent);
+  const CustomPageViewScrollPhysics({super.parent});
 
   @override
   CustomPageViewScrollPhysics applyTo(ScrollPhysics? ancestor) {

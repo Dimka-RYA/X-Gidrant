@@ -9,13 +9,44 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  cupertino_icons: ^1.0.2
   firebase_core: ^3.13.0
   firebase_auth: ^5.5.2
   cloud_firestore: ^5.6.6
   shared_preferences: ^2.5.3
-  flutter_svg: ^2.0.9
+  image_picker: ^1.1.2
+  photo_view: ^0.15.0
+  path_provider: ^2.1.1
+  permission_handler: ^12.0.0+1
+  geolocator: ^14.0.0
+  geocoding: ^3.0.0
+  video_player: ^2.9.5
+  flutter_svg: ^2.1.0
   firebase_auth_web: ^5.6.2
-  firebase_storage: ^12.4.5
+  flutter_map: ^8.1.1
+  latlong2: ^0.9.1
+  flutter_gif: ^0.0.4
+  image: ^4.5.4
+  fl_chart: ^0.71.0
+  syncfusion_flutter_charts: ^29.1.40
+  syncfusion_flutter_datepicker: ^29.1.40
+  intl: ^0.20.2
+  firebase_messaging: ^15.2.5
+  awesome_notifications: ^0.10.1
+  get_it: ^8.0.3
+  flutter_typeahead: ^5.0.2
+  flutter_custom_clippers: ^2.1.0
+  path: ^1.9.0
+  webview_flutter: ^4.8.0
+  http: ^1.2.1
+  share_plus: ^11.0.0
+  provider: ^6.1.2
+  uuid: ^4.4.0
+  cached_network_image: ^3.3.1
+  flutter_cache_manager: ^3.3.1
+  sliding_up_panel: ^2.0.0+1
+  qr_flutter: ^4.1.0
+  url_launcher: ^6.2.5
 
 dev_dependencies:
   flutter_test:
@@ -26,4 +57,11 @@ flutter:
   uses-material-design: true
   
   assets:
+    - assets/
     - lib/assets/
+    - lib/assets/sad_red_gid.mp4
+    - lib/assets/loading.mp4
+    - lib/assets/Animation - 1746311825329.gif
+    - lib/assets/Animation.gif
+    - lib/assets/loading.gif
+    - lib/assets/sad_red_gid.gif

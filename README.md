@@ -1,4 +1,4 @@
-# X-Gidrant
+# X-Гидрант - Приложение для гидрантов
 
 Проект Flutter с аутентификацией Firebase.
 
@@ -33,3 +33,30 @@ git push origin main
 flutter pub get
 flutter run
 ```
+
+## Использование кастомной GIF-анимации
+
+Для работы приложения требуется добавить GIF-анимацию для индикатора обновления:
+
+1. Поместите файл "Animation - 1746311825329.gif" в директорию `lib/assets/`
+2. Проверьте, что в файле `pubspec.yaml` есть следующие строки:
+   ```yaml
+   flutter:
+     assets:
+       - lib/assets/
+   ```
+3. Запустите команду `flutter pub get` для обновления зависимостей
+4. Запустите приложение с помощью `flutter run`
+
+## Замена GIF-анимации
+
+Если вы хотите использовать другую GIF-анимацию:
+
+1. Переименуйте ваш GIF-файл в "Animation - 1746311825329.gif" или
+2. Измените путь в файле `lib/screens/home_screen.dart` в методе `_buildWaterDropLoadingIndicator()`:
+   ```dart
+   Image.asset(
+     'lib/assets/ВАШ_ФАЙЛ.gif',
+     fit: BoxFit.contain,
+   ),
+   ```

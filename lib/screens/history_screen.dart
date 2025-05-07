@@ -1,14 +1,373 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../auth/auth_service.dart';
+import 'dart:async';
 
-class HistoryScreen extends StatelessWidget {
+class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
+
+  @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateMixin {
+  // Данные о заказах (в реальном приложении должны загружаться из API/БД)
+  final List<OrderData> _orders = [
+    OrderData(
+      id: '777',
+      service: 'Выгодно гидрант',
+      address: 'Нижний овраг',
+      status: OrderStatus.completed,
+      date: '07.05.2024',
+      time: '12:00 04.05.2024',
+      cost: 312.50,
+      currency: '\$',
+    ),
+    OrderData(
+      id: '777',
+      service: 'Выгодно гидрант',
+      address: 'Нижний овраг',
+      status: OrderStatus.rejected,
+      date: '05.05.2024',
+      time: '12:00 30.04.2024',
+      cost: 312.50,
+      currency: '\$',
+    ),
+    OrderData(
+      id: '777',
+      service: 'Выгодно гидрант',
+      address: 'Нижний овраг',
+      status: OrderStatus.completed,
+      date: '30.04.2024',
+      time: '12:00 26.04.2024',
+      cost: 312.50,
+      currency: '\$',
+    ),
+  ];
+
+  // Список активных заказов из Firestore (не выполненные и не отмененные)
+  List<OrderData> _activeOrders = [];
+  
+  // Список завершенных заказов (выполненные и отмененные)
+  List<OrderData> _completedOrders = [];
+  
+  // Текущий заказ пользователя
+  OrderData? _currentOrderData;
+  
+  // Идет ли загрузка заказов
+  bool _isLoading = true;
+  
+  // Показывать ли меню с завершенными заказами
+  bool _showCompletedOrdersMenu = false;
+  
+  // Выбранный фильтр статуса для завершенных заказов
+  OrderStatus _selectedStatusFilter = OrderStatus.completed;
+  
+  // Подписка на обновления коллекции заказов
+  StreamSubscription<QuerySnapshot>? _ordersSubscription;
+
+  // Анимация для меню архива заказов
+  AnimationController? _menuAnimationController;
+  Animation<double>? _menuScaleAnimation;
+  Animation<double>? _menuOpacityAnimation;
+  
+  // Анимация для переключения вкладок
+  AnimationController? _tabAnimationController;
+  Animation<double>? _tabIndicatorAnimation;
+  
+  // Анимация для пустого состояния (гидрант)
+  AnimationController? _emptyStateAnimationController;
+  Animation<double>? _emptyStateScaleAnimation;
+
+  // Текущий активный заказ (может быть null, если нет активного заказа)
+  OrderData? get _currentOrder {
+    return _currentOrderData;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOrders();
+    
+    // Инициализация анимации для меню
+    _menuAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    
+    _menuScaleAnimation = CurvedAnimation(
+      parent: _menuAnimationController!,
+      curve: Curves.easeOutBack,
+    );
+    
+    _menuOpacityAnimation = CurvedAnimation(
+      parent: _menuAnimationController!,
+      curve: Curves.easeIn,
+    );
+    
+    // Инициализация анимации для вкладок
+    _tabAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    
+    _tabIndicatorAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _tabAnimationController!,
+      curve: Curves.easeInOut,
+    ));
+    
+    // Инициализация анимации для пустого состояния
+    _emptyStateAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    
+    _emptyStateScaleAnimation = Tween<double>(
+      begin: 0.8,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _emptyStateAnimationController!,
+      curve: Curves.elasticOut,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _ordersSubscription?.cancel();
+    _menuAnimationController?.dispose();
+    _tabAnimationController?.dispose();
+    _emptyStateAnimationController?.dispose();
+    super.dispose();
+  }
+
+  // Загрузка заказов пользователя из Firestore
+  Future<void> _loadOrders() async {
+    final user = AuthService().currentUser;
+    
+    if (user == null) {
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
+    
+    try {
+      // Устанавливаем слушатель на коллекцию заказов для текущего пользователя
+      _ordersSubscription = FirebaseFirestore.instance
+          .collection('orders')
+          .where('userId', isEqualTo: user.uid)
+          .orderBy('createdAt', descending: true)
+          .snapshots()
+          .listen((snapshot) {
+            final activeOrders = <OrderData>[];
+            final completedOrders = <OrderData>[];
+            OrderData? currentOrder;
+            
+            for (var doc in snapshot.docs) {
+              final data = doc.data() as Map<String, dynamic>;
+              final order = _convertToOrderData(doc.id, data);
+              
+              // Определяем тип заказа по статусу
+              if (data['status'] == 'новый' || data['status'] == 'назначен' || data['status'] == 'в процессе' || data['status'] == 'на проверке') {
+                // Если заказ "в обработке", добавляем его в активные
+                activeOrders.add(order);
+                
+                // Если еще нет текущего заказа, устанавливаем его
+                if (currentOrder == null) {
+                  currentOrder = order;
+                }
+              } else if (data['status'] == 'выполнен' || data['status'] == 'отменен') {
+                // Если заказ "выполнен" или "отменен", добавляем его в завершенные
+                completedOrders.add(order);
+              } else {
+                // Если статус не определен или иной, добавляем в активные
+                activeOrders.add(order);
+              }
+            }
+            
+            if (mounted) {
+              setState(() {
+                _activeOrders = activeOrders;
+                _completedOrders = completedOrders;
+                _currentOrderData = currentOrder;
+                _isLoading = false;
+              });
+            }
+          }, onError: (error) {
+            print('Ошибка при загрузке заказов: $error');
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+              });
+            }
+          });
+    } catch (e) {
+      print('Ошибка при настройке слушателя заказов: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+  
+  // Метод для обновления заказов (pull-to-refresh)
+  Future<void> _refreshOrders() async {
+    // Отменяем текущую подписку, если она есть
+    _ordersSubscription?.cancel();
+    _ordersSubscription = null;
+    
+    setState(() {
+      _isLoading = true;
+      _activeOrders = [];
+      _completedOrders = [];
+      _currentOrderData = null;
+    });
+    
+    // Загружаем заказы заново
+    await _loadOrders();
+  }
+  
+  // Конвертация данных из Firestore в OrderData
+  OrderData _convertToOrderData(String docId, Map<String, dynamic> data) {
+    // Определяем статус заказа
+    OrderStatus status;
+    switch (data['status']) {
+      case 'новый':
+      case 'назначен':
+      case 'в процессе':
+      case 'на проверке':
+        status = OrderStatus.active;
+        break;
+      case 'выполнен':
+        status = OrderStatus.completed;
+        break;
+      case 'отменен':
+        status = OrderStatus.rejected;
+        break;
+      default:
+        status = OrderStatus.active;
+    }
+    
+    // Форматируем дату
+    String formattedDate = '';
+    String formattedTime = '';
+    
+    if (data['createdAt'] != null) {
+      try {
+        final timestamp = data['createdAt'] as Timestamp;
+        final date = timestamp.toDate();
+        
+        // Форматируем дату: DD.MM.YYYY
+        formattedDate = '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}';
+        
+        // Форматируем время: HH:MM DD.MM.YYYY
+        formattedTime = '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')} $formattedDate';
+      } catch (e) {
+        print('Ошибка при форматировании даты: $e');
+        formattedDate = 'Нет данных';
+        formattedTime = 'Нет данных';
+      }
+    }
+    
+    // Создаем список событий статуса (если есть)
+    final List<OrderStatusEvent> statusEvents = [];
+    if (data['statusEvents'] != null && data['statusEvents'] is List) {
+      for (var event in data['statusEvents']) {
+        if (event is Map<String, dynamic>) {
+          statusEvents.add(OrderStatusEvent(
+            status: event['status'] ?? 'Статус',
+            dateTime: event['dateTime'] ?? 'Нет времени',
+            notes: event['notes'],
+            color: _getStatusColor(event['status']),
+          ));
+        }
+      }
+    }
+    
+    // Подготавливаем данные о кодах подтверждения
+    Map<String, dynamic> additionalData = {};
+    
+    // Сохраняем оригинальную дополнительную информацию, если она есть
+    if (data['additionalInfo'] != null) {
+      if (data['additionalInfo'] is String) {
+        additionalData['info'] = data['additionalInfo'];
+      } else if (data['additionalInfo'] is Map) {
+        // Если additionalInfo уже карта, добавляем её содержимое
+        additionalData.addAll(data['additionalInfo'] as Map<String, dynamic>);
+      }
+    }
+    
+    // Добавляем коды подтверждения
+    additionalData['arrivalCode'] = data['arrivalCode'] ?? 'Не указан';
+    additionalData['completionCode'] = data['completionCode'] ?? 'Не указан';
+    
+    // Отладочная информация
+    print('ID: $docId, Добавлены коды: прибытие=${additionalData['arrivalCode']}, завершение=${additionalData['completionCode']}');
+    
+    // Создаем и возвращаем объект OrderData
+    return OrderData(
+      id: docId,
+      service: data['title'] ?? 'Без названия',
+      address: data['address'] ?? 'Без адреса',
+      status: status,
+      date: formattedDate,
+      time: formattedTime,
+      cost: (data['price'] is num) ? (data['price'] as num).toDouble() : 0.0,
+      currency: data['currency'] ?? '\$',
+      additionalInfo: additionalData,
+      statusEvents: statusEvents,
+      originalStatus: data['status'],
+    );
+  }
+  
+  // Получение цвета статуса
+  Color _getStatusColor(String? status) {
+    switch (status) {
+      case 'новый':
+        return Colors.blue;
+      case 'назначен':
+        return Colors.orange.shade700;
+      case 'в процессе':
+        return Colors.orange;
+      case 'на проверке':
+        return Colors.orange.shade300;
+      case 'выполнен':
+        return Colors.green;
+      case 'отменен':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // Получение читаемого текста статуса
+  String _getStatusText(String? status) {
+    switch (status) {
+      case 'новый':
+        return 'Новый';
+      case 'назначен':
+        return 'Назначен мастер';
+      case 'в процессе':
+        return 'В процессе';
+      case 'на проверке':
+        return 'На проверке';
+      case 'выполнен':
+        return 'Выполнен';
+      case 'отменен':
+        return 'Отменен';
+      default:
+        return status ?? 'Неизвестный статус';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         title: const Text(
           'История заказов',
@@ -17,40 +376,158 @@ class HistoryScreen extends StatelessWidget {
             fontWeight: FontWeight.bold,
           ),
         ),
+        actions: [
+          // Кнопка для открытия меню с выполненными и отмененными заказами
+          IconButton(
+            icon: Icon(
+              _showCompletedOrdersMenu 
+                  ? Icons.close 
+                  : Icons.filter_list,
+              color: const Color(0xFFD04E4E),
+            ),
+            onPressed: () {
+              setState(() {
+                _showCompletedOrdersMenu = !_showCompletedOrdersMenu;
+                
+                if (_showCompletedOrdersMenu) {
+                  // Запускаем анимацию появления меню
+                  _menuAnimationController!.forward();
+                  
+                  // Сбрасываем и запускаем анимацию пустого состояния, если нет заказов
+                  _emptyStateAnimationController!.reset();
+                  _emptyStateAnimationController!.forward();
+                } else {
+                  // Запускаем анимацию исчезновения меню
+                  _menuAnimationController!.reverse();
+                }
+              });
+            },
+            tooltip: 'Архив заказов',
+          ),
+        ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Фильтры
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
+        child: _isLoading 
+          ? _buildLoadingView()
+          : RefreshIndicator(
+              onRefresh: _refreshOrders,
+              color: const Color(0xFFD04E4E),
+              child: Stack(
                 children: [
-                  Expanded(
-                    child: _buildFilterButton('Все', true),
+                  // Основное содержимое истории
+                  SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: MediaQuery.of(context).size.height - 
+                                   AppBar().preferredSize.height - 
+                                   MediaQuery.of(context).padding.top - 
+                                   MediaQuery.of(context).padding.bottom,
+                      ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+                          // Заголовок "Активные заказы"
+              const Padding(
+                            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                              'Активные заказы',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _buildFilterButton('Активные', false),
+                ),
+              ),
+              
+                          // Список активных заказов
+                          _activeOrders.isEmpty
+                            ? _buildEmptyHistoryView(message: 'У вас пока нет активных заказов')
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      physics: const NeverScrollableScrollPhysics(),
+                      shrinkWrap: true,
+                                itemCount: _activeOrders.length,
+                      itemBuilder: (context, index) {
+                                  return _buildOrderHistoryCard(_activeOrders[index]);
+                      },
+                    ),
+            ],
+          ),
+        ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _buildFilterButton('Завершенные', false),
-                  ),
+                  
+                  // Контекстное меню с завершенными заказами (снизу вверх) с анимацией
+                  if (_showCompletedOrdersMenu)
+                    AnimatedBuilder(
+                      animation: _menuAnimationController!,
+                      builder: (context, child) {
+                        return Opacity(
+                          opacity: _menuOpacityAnimation!.value,
+                          child: Transform.scale(
+                            scale: _menuScaleAnimation!.value,
+                            alignment: Alignment.bottomCenter,
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: _buildCompletedOrdersMenu(),
+                    ),
                 ],
               ),
             ),
-            
+      ),
+    );
+  }
+  
+  // Виджет отображения индикатора загрузки
+  Widget _buildLoadingView() {
+    return const Center(
+      child: CircularProgressIndicator(
+        color: Color(0xFFD04E4E),
+      ),
+    );
+  }
+
+  // Виджет для отображения пустой истории заказов с GIF-анимацией
+  Widget _buildEmptyHistoryView({String message = 'У вас пока нет истории заказов'}) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // GIF-анимация грустного гидранта с анимацией
+            AnimatedBuilder(
+              animation: _emptyStateAnimationController ?? const AlwaysStoppedAnimation(1.0),
+              builder: (context, child) {
+                return Transform.scale(
+                  scale: _emptyStateScaleAnimation?.value ?? 1.0,
+                  child: child,
+                );
+              },
+              child: SizedBox(
+              width: 200,
+              height: 200,
+              child: Image.asset(
+                'lib/assets/sad_red_gid.gif',
+                fit: BoxFit.contain,
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
-            
-            // Список заказов
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: 10,
-                itemBuilder: (context, index) {
-                  return _buildOrderCard(index);
-                },
+            // Текст об отсутствии заказов с анимацией появления
+            AnimatedOpacity(
+              opacity: _emptyStateAnimationController?.value ?? 1.0,
+              duration: const Duration(milliseconds: 400),
+              curve: Curves.easeIn,
+              child: Text(
+                message,
+                style: const TextStyle(
+                color: Colors.grey,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
               ),
             ),
           ],
@@ -59,36 +536,324 @@ class HistoryScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFilterButton(String label, bool isSelected) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        color: isSelected ? Colors.red : Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: isSelected ? Colors.red : Colors.grey[300]!,
+  // Выдвижное меню для отображения завершенных заказов (снизу вверх)
+  Widget _buildCompletedOrdersMenu() {
+    // Получаем отфильтрованные заказы
+    final filteredOrders = _completedOrders
+        .where((order) => order.status == _selectedStatusFilter)
+        .toList();
+    
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: MediaQuery.of(context).size.height * 0.7,
+      child: GestureDetector(
+        onVerticalDragEnd: (details) {
+          // Если скорость свайпа вниз больше порогового значения, закрываем меню
+          if (details.primaryVelocity != null && details.primaryVelocity! > 300) {
+            setState(() {
+              _showCompletedOrdersMenu = false;
+            });
+          }
+        },
+        child: DraggableScrollableSheet(
+          initialChildSize: 1.0, // Начальный размер от максимальной высоты
+          minChildSize: 0.3, // Минимальный размер (30% от высоты)
+          maxChildSize: 1.0, // Максимальный размер (100% от высоты)
+          expand: false,
+          builder: (context, scrollController) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                ),
+          boxShadow: [
+            BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+              blurRadius: 10,
+                    offset: const Offset(0, -3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+                  // Полоска для закрытия (делаем интерактивной)
+                  GestureDetector(
+                    onVerticalDragEnd: (details) {
+                      // Если скорость свайпа вниз больше порогового значения, закрываем меню
+                      if (details.primaryVelocity != null && details.primaryVelocity! > 300) {
+                        setState(() {
+                          _showCompletedOrdersMenu = false;
+                        });
+                      }
+                    },
+                    onTap: () {
+                      setState(() {
+                        _showCompletedOrdersMenu = false;
+                      });
+                    },
+                    child: Center(
+                      child: Container(
+                        margin: const EdgeInsets.only(top: 8, bottom: 8),
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[400],
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                  ),
+                  
+                  // Заголовок меню
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFD04E4E).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(
+                                Icons.history,
+                                color: Color(0xFFD04E4E),
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                const Text(
+                              'Архив заказов',
+                  style: TextStyle(
+                                fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.grey),
+                          onPressed: () {
+                            setState(() {
+                              _showCompletedOrdersMenu = false;
+                            });
+                          },
+                ),
+              ],
+            ),
+                  ),
+                  
+                  // Вкладки "Выполнено" и "Отменено"
+                  _buildStatusTabs(),
+                  
+                  // Список завершенных заказов
+                  Expanded(
+                    child: filteredOrders.isEmpty
+                        ? _buildEmptyHistoryView(message: 'У вас пока нет заказов с таким статусом')
+                        : ListView.builder(
+                            controller: scrollController,
+                            padding: const EdgeInsets.all(16),
+                            itemCount: filteredOrders.length,
+                            itemBuilder: (context, index) {
+                              return _buildOrderHistoryCard(filteredOrders[index]);
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       ),
-      child: Center(
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.black,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+    );
+  }
+  
+  // Вкладки для фильтрации по статусам с анимированным переключением
+  Widget _buildStatusTabs() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: [
+          Row(
+            children: [
+              _buildStatusTab(
+                label: 'Выполнено',
+                count: _completedOrders.where((order) => order.status == OrderStatus.completed).length,
+                color: Colors.green,
+                isSelected: _selectedStatusFilter == OrderStatus.completed,
+                onTap: () {
+                  setState(() {
+                    if (_selectedStatusFilter != OrderStatus.completed) {
+                      _selectedStatusFilter = OrderStatus.completed;
+                      
+                      // Сбрасываем анимацию и запускаем в обратном направлении
+                      _tabAnimationController!.reset();
+                      _tabAnimationController!.forward();
+                      
+                      // Запускаем анимацию пустого состояния
+                      _emptyStateAnimationController!.reset();
+                      _emptyStateAnimationController!.forward();
+                    }
+                  });
+                },
+              ),
+              const SizedBox(width: 12),
+              _buildStatusTab(
+                label: 'Отменено',
+                count: _completedOrders.where((order) => order.status == OrderStatus.rejected).length,
+                color: Colors.red,
+                isSelected: _selectedStatusFilter == OrderStatus.rejected,
+                onTap: () {
+                  setState(() {
+                    if (_selectedStatusFilter != OrderStatus.rejected) {
+                      _selectedStatusFilter = OrderStatus.rejected;
+                      
+                      // Сбрасываем анимацию и запускаем
+                      _tabAnimationController!.reset();
+                      _tabAnimationController!.forward();
+                      
+                      // Запускаем анимацию пустого состояния
+                      _emptyStateAnimationController!.reset();
+                      _emptyStateAnimationController!.forward();
+                    }
+                  });
+                },
+              ),
+            ],
+          ),
+          // Индикатор выбранной вкладки с анимацией
+          const SizedBox(height: 8),
+          AnimatedBuilder(
+            animation: _tabAnimationController!,
+            builder: (context, child) {
+              return Container(
+                height: 3,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16),
+                            height: 3,
+                            decoration: BoxDecoration(
+                              color: Colors.grey.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(1.5),
+                            ),
+                          ),
+                          Positioned(
+                            left: _selectedStatusFilter == OrderStatus.completed ? 16 : null,
+                            right: _selectedStatusFilter == OrderStatus.rejected ? 16 : null,
+                            child: Container(
+                              width: (MediaQuery.of(context).size.width - 44 - 12) / 2 * _tabIndicatorAnimation!.value,
+                              height: 3,
+                              decoration: BoxDecoration(
+                                color: _selectedStatusFilter == OrderStatus.completed 
+                                    ? Colors.green.withOpacity(0.6) 
+                                    : Colors.red.withOpacity(0.6),
+                                borderRadius: BorderRadius.circular(1.5),
+                              ),
+                    ),
+                  ),
+                ],
+              ),
+                    ),
+                  ],
+                ),
+              );
+            },
+            ),
+          ],
+        ),
+      );
+    }
+  
+  // Отдельная вкладка для фильтра по статусу
+  Widget _buildStatusTab({
+    required String label,
+    required int count,
+    required Color color,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? color.withOpacity(0.1) : Colors.grey.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isSelected ? color.withOpacity(0.5) : Colors.grey.withOpacity(0.2),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  color: isSelected ? color : Colors.grey[700],
+                ),
+              ),
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isSelected ? color.withOpacity(0.2) : Colors.grey.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  count.toString(),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: isSelected ? color : Colors.grey[700],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildOrderCard(int index) {
-    // Статус заказа
-    final bool isActive = index % 3 == 0;
-    final String status = isActive ? 'В процессе' : 'Завершен';
-    final Color statusColor = isActive ? Colors.blue : Colors.green;
+  // Карточка с информацией о заказе из истории
+  Widget _buildOrderHistoryCard(OrderData order) {
+    // Получаем статус из оригинальных данных заказа
+    Color statusColor = _getStatusColor(order.originalStatus);
+    String statusText = _getStatusText(order.originalStatus);
+    
+    // Получаем текст для дополнительной информации
+    String additionalInfoText = '';
+    if (order.additionalInfo != null) {
+      if (order.additionalInfo is String) {
+        additionalInfoText = order.additionalInfo as String;
+      } else if (order.additionalInfo is Map) {
+        // Если это Map, отображаем только поле info, если оно есть
+        final Map<dynamic, dynamic> infoMap = order.additionalInfo as Map;
+        if (infoMap.containsKey('info')) {
+          additionalInfoText = infoMap['info'].toString();
+        }
+      }
+    }
     
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -100,124 +865,462 @@ class HistoryScreen extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        children: [
-          // Шапка карточки с номером и статусом
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.black,
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Заказ #${1000 + index}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    status,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          // Содержимое карточки
-          Padding(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            // Открываем окно с подробной информацией о заказе
+            _showOrderDetails(order);
+          },
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Услуга
-                _buildInfoRow(
-                  'Услуга:',
-                  'Установка гидранта',
+                // Верхняя строка: ID заказа и дата
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Заказ #${order.id}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    Text(
+                      order.date,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                
+                // Название услуги
+                Text(
+                  order.service,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 8),
                 
                 // Адрес
-                _buildInfoRow(
-                  'Адрес:',
-                  'ул. Ленина, 42, Москва',
-                ),
-                const SizedBox(height: 8),
-                
-                // Дата
-                _buildInfoRow(
-                  'Дата:',
-                  '${10 + index}.05.2024',
-                ),
-                const SizedBox(height: 8),
-                
-                // Стоимость
-                _buildInfoRow(
-                  'Стоимость:',
-                  '${5000 + index * 100} ₽',
-                  valueStyle: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red,
-                  ),
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // Кнопки
                 Row(
                   children: [
+                    const Icon(
+                      Icons.location_on_outlined,
+                      size: 16,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 4),
                     Expanded(
+                      child: Text(
+                        order.address,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                
+                // Нижняя строка: Стоимость и статус
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${order.cost.toStringAsFixed(2)} ${order.currency}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        statusText,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: statusColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                
+                // Дополнительная информация (при наличии)
+                if (additionalInfoText.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Доп. информация: $additionalInfoText',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                      fontStyle: FontStyle.italic,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Показать детальную информацию о заказе в модальном окне
+  void _showOrderDetails(OrderData order) {
+    // Определяем цвет статуса
+    Color statusColor;
+    String statusText;
+    
+    // Получаем статус из оригинальных данных заказа
+    statusColor = _getStatusColor(order.originalStatus);
+    statusText = _getStatusText(order.originalStatus);
+    
+    // Создаем переменную для отслеживания состояния развернутости дополнительной информации
+    bool isDetailsExpanded = false;
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+    return Container(
+              height: MediaQuery.of(context).size.height * 0.75,
+              decoration: const BoxDecoration(
+        color: Colors.white,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  topRight: Radius.circular(20),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                  // Полоска для закрытия
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.only(top: 12, bottom: 16),
+                      width: 40,
+                      height: 4,
+                            decoration: BoxDecoration(
+                        color: Colors.grey[400],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  
+                  // Заголовок модального окна
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: Row(
+            children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: statusColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            order.status == OrderStatus.active ? Icons.access_time : 
+                            order.status == OrderStatus.completed ? Icons.check_circle : 
+                            Icons.cancel,
+                            color: statusColor,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                                order.service,
+                style: const TextStyle(
+                                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+                                  Text(
+                                'Заказ #${order.id}',
+                                    style: TextStyle(
+                                  fontSize: 14,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  
+                  // Основная информация и детали заказа
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      physics: const BouncingScrollPhysics(),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Информация о заказе (всегда отображается)
+                          _buildOrderInfoSection(order, statusColor, statusText),
+                          
+                          const SizedBox(height: 20),
+                          
+                          // Раздел с дополнительной информацией (раскрывающийся)
+              Container(
+                decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Заголовок дополнительной информации с кнопкой раскрытия
+                                GestureDetector(
+                                  onTap: () {
+                                    setModalState(() {
+                                      isDetailsExpanded = !isDetailsExpanded;
+                                    });
+                                  },
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                            Text(
+                                        'Детали заказа',
+                  style: TextStyle(
+                                          fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                                          color: Colors.grey[800],
+                                        ),
+                                      ),
+                                      AnimatedRotation(
+                                        turns: isDetailsExpanded ? 0.5 : 0.0,
+                                        duration: const Duration(milliseconds: 300),
+                                        child: Icon(
+                                          Icons.keyboard_arrow_down,
+                                          color: isDetailsExpanded 
+                                              ? const Color(0xFFD04E4E)
+                                              : Colors.grey,
+                ),
+              ),
+            ],
+          ),
+                                ),
+                                
+                                // Анимированное раскрытие/скрытие дополнительной информации
+                                AnimatedCrossFade(
+                                  firstChild: const SizedBox(height: 0),
+                                  secondChild: Padding(
+                                    padding: const EdgeInsets.only(top: 16),
+              child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                                        if (order.additionalInfo != null && order.additionalInfo!.isNotEmpty)
+                                          _buildDetailRow('Дополнительная информация:', order.additionalInfo!),
+                                        
+                                        if (order.statusEvents != null && order.statusEvents!.isNotEmpty) ...[
+                                          const SizedBox(height: 16),
+                                          const Text(
+                                            'История статусов:',
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                  const SizedBox(height: 8),
+                                          ..._buildStatusEventsTimeline(order.statusEvents!),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  crossFadeState: isDetailsExpanded 
+                                      ? CrossFadeState.showSecond 
+                                      : CrossFadeState.showFirst,
+                                  duration: const Duration(milliseconds: 300),
+            ),
+          ],
+        ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  
+                  // Кнопка действия внизу (если заказ активный)
+                  if (order.status == OrderStatus.active)
+                    Padding(
+                      padding: const EdgeInsets.all(16),
                       child: ElevatedButton(
-                        onPressed: () {},
+                        onPressed: () {
+                          // Действие для активного заказа (например, отмена)
+                          Navigator.pop(context);
+                          // Здесь можно добавить логику отмены заказа
+                        },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
+                          backgroundColor: Colors.red[600],
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        child: const Text('Детали'),
-                      ),
-                    ),
-                    if (isActive) ...[
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () {},
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
+                        child: const Text(
+                          'Отменить заказ',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
                           ),
-                          child: const Text('Отменить'),
                         ),
+                              ),
+                            ),
+                        ],
                       ),
-                    ],
-                  ],
+            );
+          },
+        );
+      },
+                    );
+                  } 
+
+  // Построение раздела с основной информацией о заказе
+  Widget _buildOrderInfoSection(OrderData order, Color statusColor, String statusText) {
+                    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+            'Информация о заказе',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[800],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildDetailRow('Услуга:', order.service),
+          _buildDetailRow('Дата:', order.time),
+          _buildDetailRow('Адрес:', order.address),
+          _buildDetailRow('Стоимость:', '${order.cost.toStringAsFixed(2)} ${order.currency}', 
+            valueColor: const Color(0xFFD04E4E)),
+          _buildDetailRow('Статус:', statusText, valueColor: statusColor),
+          
+          // Добавляем коды подтверждения
+          if (order.additionalInfo is Map<String, dynamic> || order.additionalInfo is Map) ...[
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 16),
+            
+            Text(
+              'Коды подтверждения',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey[800],
+              ),
+            ),
+            const SizedBox(height: 12),
+            
+            // Код прибытия
+            _buildConfirmationCode('Код прибытия', 
+              _getCodeFromData(order, 'arrivalCode'), Icons.location_on, Colors.green),
+              
+            const SizedBox(height: 8),
+            
+            // Код завершения
+            _buildConfirmationCode('Код завершения', 
+              _getCodeFromData(order, 'completionCode'), Icons.check_circle, Colors.blue),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Извлекаем код из данных заказа
+  String _getCodeFromData(OrderData order, String codeType) {
+    if (order.additionalInfo is Map<String, dynamic>) {
+      return (order.additionalInfo as Map<String, dynamic>)[codeType] ?? 'Не указан';
+    } else if (order.additionalInfo is String) {
+      // Если есть additionalInfo в виде строки, пытаемся искать код в ней
+      final String info = order.additionalInfo as String;
+      if (info.contains(codeType)) {
+        // Очень упрощенный парсинг, можно улучшить при необходимости
+        final startIndex = info.indexOf(codeType) + codeType.length;
+        final endIndex = info.indexOf('\n', startIndex);
+        if (endIndex > startIndex) {
+          return info.substring(startIndex, endIndex).trim();
+        }
+      }
+    }
+    return 'Не указан';
+  }
+  
+  // Виджет для отображения кода подтверждения
+  Widget _buildConfirmationCode(String label, String code, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3), width: 1),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.grey[700],
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  code,
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2.0,
+                  ),
                 ),
               ],
             ),
@@ -227,21 +1330,188 @@ class HistoryScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildInfoRow(String label, String value, {TextStyle? valueStyle}) {
-    return Row(
+  // Построение строки с парой "название: значение"
+  Widget _buildDetailRow(String label, dynamic value, {Color? valueColor}) {
+    // Преобразуем значение в строку в зависимости от типа
+    String displayValue = '';
+    
+    if (value is String) {
+      displayValue = value;
+    } else if (value is Map) {
+      // Если это карта, извлекаем поле info, если оно есть
+      if (value.containsKey('info')) {
+        displayValue = value['info'].toString();
+      } else {
+        // Иначе преобразуем всю карту в строку, исключая arrivalCode и completionCode
+        final filteredMap = Map<dynamic, dynamic>.from(value)
+          ..removeWhere((key, _) => key == 'arrivalCode' || key == 'completionCode');
+        
+        if (filteredMap.isNotEmpty) {
+          displayValue = filteredMap.toString();
+        } else {
+          displayValue = 'Нет дополнительной информации';
+        }
+      }
+    } else {
+      // Для других типов просто преобразуем в строку
+      displayValue = value?.toString() ?? '';
+    }
+    
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[600],
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              displayValue,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: valueColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Построение временной шкалы событий статуса заказа
+  List<Widget> _buildStatusEventsTimeline(List<OrderStatusEvent> events) {
+    final List<Widget> timelineItems = [];
+    
+    for (int i = 0; i < events.length; i++) {
+      final event = events[i];
+      final isLast = i == events.length - 1;
+      
+      timelineItems.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+            // Точка и линия временной шкалы
+            Column(
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: event.color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                if (!isLast)
+                  Container(
+                    width: 2,
+                    height: 30,
+                    color: Colors.grey[300],
+                  ),
+              ],
+            ),
+            const SizedBox(width: 12),
+            // Информация о событии
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
         Text(
-          label,
+                    event.status,
           style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: event.color,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    event.dateTime,
+                    style: TextStyle(
+                      fontSize: 12,
             color: Colors.grey[600],
           ),
         ),
-        const SizedBox(width: 8),
-        Text(
-          value,
-          style: valueStyle ?? const TextStyle(fontWeight: FontWeight.w500),
+                  if (event.notes != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      event.notes!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[800],
+                        fontStyle: FontStyle.italic,
+          ),
         ),
       ],
+                  if (!isLast)
+                    const SizedBox(height: 16),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
+
+    return timelineItems;
+  }
+}
+
+// Модель события статуса заказа
+class OrderStatusEvent {
+  final String status;
+  final String dateTime;
+  final String? notes;
+  final Color color;
+
+  OrderStatusEvent({
+    required this.status,
+    required this.dateTime,
+    this.notes,
+    required this.color,
+  });
+}
+
+// Модель данных заказа
+class OrderData {
+  final String id;
+  final String service;
+  final String address;
+  final OrderStatus status;
+  final String date;
+  final String time;
+  final double cost;
+  final String currency;
+  final dynamic additionalInfo;
+  final List<OrderStatusEvent>? statusEvents;
+  final String? originalStatus;
+
+  OrderData({
+    required this.id,
+    required this.service,
+    required this.address,
+    required this.status,
+    required this.date,
+    required this.time,
+    required this.cost,
+    required this.currency,
+    this.additionalInfo,
+    this.statusEvents,
+    this.originalStatus,
+  });
+}
+
+// Перечисление возможных статусов заказа
+enum OrderStatus {
+  active,
+  completed,
+  rejected,
 } 

@@ -45,5 +45,17 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Приложению требуется доступ к вашему местоположению для отображения на карте</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Приложению требуется доступ к вашему местоположению для отображения на карте</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Приложению требуется доступ к вашему местоположению для отображения на карте</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Приложению требуется доступ к фотографиям для выбора аватара профиля</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Приложению требуется доступ к камере для создания фото профиля</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Приложению требуется доступ к микрофону для видеозаписи</string>
 </dict>
 </plist>

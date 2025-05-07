@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'auth_service.dart';
 import 'register_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -37,19 +38,66 @@ class _LoginScreenState extends State<LoginScreen> {
       try {
         final success = await _authService.signIn(email, password);
         
-        if (success && mounted) {
-          Navigator.pushReplacementNamed(context, '/main');
+        if (!mounted) return;
+        
+        if (success) {
+          // Проверяем роль пользователя после входа
+          final role = await _authService.getUserRole();
+          final isEngineer = await _authService.isEngineer();
+          print('ВХОД: Успешный вход, роль: $role, инженер: $isEngineer');
+          
+          // Получаем актуальные данные из Firestore
+          final user = _authService.currentUser;
+          if (user != null) {
+            try {
+              final userDoc = await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(user.uid)
+                  .get();
+              
+              if (userDoc.exists) {
+                final userData = userDoc.data();
+                if (userData != null && userData.containsKey('role')) {
+                  final firestoreRole = userData['role'].toString().trim().toLowerCase();
+                  print('ВХОД: Роль из Firestore: "$firestoreRole"');
+                  
+                  // Определяем направление на основе данных из Firestore
+                  if (firestoreRole == 'engineer'.toLowerCase()) {
+                    print('ВХОД: Перенаправление на экран инженера (из Firestore)');
+                    Navigator.pushReplacementNamed(context, '/engineer');
+                    return;
+                  }
+                }
+              }
+            } catch (e) {
+              print('ВХОД: Ошибка при получении данных из Firestore: $e');
+            }
+          }
+          
+          // Перенаправляем на соответствующий экран в зависимости от кэшированной роли
+          if (isEngineer) {
+            print('ВХОД: Перенаправление на экран инженера (из кэша)');
+            Navigator.pushReplacementNamed(context, '/engineer');
+          } else {
+            print('ВХОД: Перенаправление на экран клиента');
+            Navigator.pushReplacementNamed(context, '/main');
+          }
         } else {
           setState(() {
-            _error = 'Неверный email или пароль';
-            _isLoading = false;
+            _error = 'Не удалось войти. Проверьте логин и пароль.';
           });
         }
       } catch (e) {
+        if (!mounted) return;
         setState(() {
-          _error = e.toString();
-          _isLoading = false;
+          _error = 'Ошибка входа: ${e.toString()}';
         });
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
     }
   }
@@ -210,8 +258,47 @@ class _LoginScreenState extends State<LoginScreen> {
                               if (!mounted) return;
                               
                               if (success) {
-                                print('Вход успешен, переход на главный экран');
-                                Navigator.pushReplacementNamed(context, '/main');
+                                // Проверяем роль пользователя после входа
+                                final role = await _authService.getUserRole();
+                                final isEngineer = await _authService.isEngineer();
+                                print('ВХОД: Успешный вход, роль: $role, инженер: $isEngineer');
+                                
+                                // Получаем актуальные данные из Firestore
+                                final user = _authService.currentUser;
+                                if (user != null) {
+                                  try {
+                                    final userDoc = await FirebaseFirestore.instance
+                                        .collection('users')
+                                        .doc(user.uid)
+                                        .get();
+                                    
+                                    if (userDoc.exists) {
+                                      final userData = userDoc.data();
+                                      if (userData != null && userData.containsKey('role')) {
+                                        final firestoreRole = userData['role'].toString().trim().toLowerCase();
+                                        print('ВХОД: Роль из Firestore: "$firestoreRole"');
+                                        
+                                        // Определяем направление на основе данных из Firestore
+                                        if (firestoreRole == 'engineer'.toLowerCase()) {
+                                          print('ВХОД: Перенаправление на экран инженера (из Firestore)');
+                                          Navigator.pushReplacementNamed(context, '/engineer');
+                                          return;
+                                        }
+                                      }
+                                    }
+                                  } catch (e) {
+                                    print('ВХОД: Ошибка при получении данных из Firestore: $e');
+                                  }
+                                }
+                                
+                                // Перенаправляем на соответствующий экран в зависимости от кэшированной роли
+                                if (isEngineer) {
+                                  print('ВХОД: Перенаправление на экран инженера (из кэша)');
+                                  Navigator.pushReplacementNamed(context, '/engineer');
+                                } else {
+                                  print('ВХОД: Перенаправление на экран клиента');
+                                  Navigator.pushReplacementNamed(context, '/main');
+                                }
                               } else {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(

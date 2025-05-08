@@ -203,6 +203,9 @@ class _EngineerMainScreenState extends State<EngineerMainScreen> {
     final user = AuthService().currentUser;
     if (user == null) return;
 
+    // Отладочная информация о текущем пользователе
+    print('ТЕКУЩИЙ ПОЛЬЗОВАТЕЛЬ: ID=${user.uid}, DisplayName=${user.displayName}');
+
     // Сначала получаем данные инженера для проверки имени
     FirebaseFirestore.instance
         .collection('users')
@@ -222,20 +225,48 @@ class _EngineerMainScreenState extends State<EngineerMainScreen> {
       // Отменяем предыдущую подписку если она существует
       _assignedTasksSubscription?.cancel();
 
-      // Подписываемся на обновления коллекции заказов
+      // Подписываемся на обновления заказов, фильтруя по UID инженера
       _assignedTasksSubscription = FirebaseFirestore.instance
           .collection('orders')
-          .where(Filter.or(
-            Filter('assignedTo', isEqualTo: user.uid),
-            Filter('assignedToName', isEqualTo: engineerName)
-          ))
-          .where('status', whereIn: ['назначен', 'прибыл', 'в работе'])
+          .where('assignedTo', isEqualTo: user.uid) // Строгая фильтрация по UID инженера
           .snapshots()
           .listen((snapshot) {
         // Проверяем, что виджет все еще в дереве
         if (!mounted) return;
+        
+        print('ДИАГНОСТИКА ЗАКАЗОВ:');
+        print('Получено заказов из Firestore для ID=${user.uid}: ${snapshot.docs.length}');
+        
+        // Проверяем каждый документ подробно
+        snapshot.docs.forEach((doc) {
+          final docId = doc.id;
+          final data = doc.data();
+          final String status = data['status'] ?? '';
+          
+          print('Заказ ID: $docId');
+          print('- assignedTo: "${data['assignedTo'] ?? ''}" (ожидается: "${user.uid}")');
+          print('- status: "$status"');
+        });
             
-        if (snapshot.docs.isEmpty) {
+        // Фильтруем заказы только по статусу (теперь уже точно знаем, что они назначены текущему инженеру)
+        final activeOrders = snapshot.docs.where((doc) {
+          final data = doc.data();
+          final String status = data['status'] ?? '';
+          
+          // Статусы, которые считаются активными
+          final bool hasValidStatus = status.isNotEmpty && 
+              ['назначен', 'прибыл', 'в работе', 'принят', 'выехал', 'работает', 'в процессе'].any((s) => status.toLowerCase().contains(s.toLowerCase()));
+          
+          if (hasValidStatus) {
+            print('Заказ ${doc.id} в активном статусе: status=$status');
+          }
+          
+          return hasValidStatus;
+        }).toList();
+        
+        print('ИТОГ: Найдено активных заказов для инженера: ${activeOrders.length}');
+        
+        if (activeOrders.isEmpty) {
           setState(() {
             _activeTask = null;
           });
@@ -243,7 +274,8 @@ class _EngineerMainScreenState extends State<EngineerMainScreen> {
         }
 
         // Берем первый активный заказ
-        final doc = snapshot.docs.first;
+        final doc = activeOrders.first;
+        print('Выбран активный заказ: ${doc.id}');
         final newTask = Task.fromFirestore(doc);
 
         setState(() {
@@ -298,59 +330,13 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
   late Animation<double> _animation;
   int _touchedIndex = -1;
   
-  // Демо-данные для заказов с категориями
-  final List<IncomeItem> allOrders = [
-    IncomeItem(
-      id: '779',
-      amount: 312.00,
-      date: DateTime.now().subtract(const Duration(days: 1)),
-      address: 'ул. Ленина, 10',
-      clientName: 'Клиент 1',
-      description: 'Техническое обслуживание гидранта',
-      completed: true,
-      category: 'Обслуживание',
-    ),
-    IncomeItem(
-      id: '778',
-      amount: 312.00,
-      date: DateTime.now().subtract(const Duration(days: 1)),
-      address: 'ул. Ленина, 11',
-      clientName: 'Клиент 2',
-      description: 'Техническое обслуживание гидранта',
-      completed: true,
-      category: 'Обслуживание',
-    ),
-    IncomeItem(
-      id: '781',
-      amount: 312.00,
-      date: DateTime.now().subtract(const Duration(days: 2)),
-      address: 'ул. Ленина, 12',
-      clientName: 'Клиент 3',
-      description: 'Техническое обслуживание гидранта',
-      completed: true,
-      category: 'Обслуживание',
-    ),
-    IncomeItem(
-      id: '780',
-      amount: 312.00,
-      date: DateTime.now().subtract(const Duration(days: 2)),
-      address: 'ул. Ленина, 13',
-      clientName: 'Клиент 4',
-      description: 'Техническое обслуживание гидранта',
-      completed: true,
-      category: 'Обслуживание',
-    ),
-    IncomeItem(
-      id: '783',
-      amount: 624.00,
-      date: DateTime.now().subtract(const Duration(days: 3)),
-      address: 'ул. Пушкина, 14',
-      clientName: 'Клиент 5',
-      description: 'Установка нового гидранта',
-      completed: true,
-      category: 'Установка',
-    ),
-  ];
+  // Списки для хранения всех заказов и заказов истории
+  List<IncomeItem> allOrders = [];
+  List<IncomeItem> historyOrders = [];
+  
+  // Подписки на обновления Firestore
+  StreamSubscription? _activeOrdersSubscription;
+  StreamSubscription? _historyOrdersSubscription;
   
   // Список категорий с их цветами
   final Map<String, Color> categoryColors = {
@@ -358,6 +344,8 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
     'Установка': const Color(0xFF1ED9C4),    // Бирюзовый
     'Ремонт': const Color(0xFFFFB830),       // Оранжевый
     'Консультация': const Color(0xFF8A77FF), // Фиолетовый
+    'Гидрант': const Color(0xFF1ED9C4),      // Бирюзовый (как установка)
+    'Другое': const Color(0xFF8A77FF),       // Фиолетовый (как консультация)
   };
   
   // Иконки для категорий
@@ -366,6 +354,8 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
     'Установка': Icons.add_circle,
     'Ремонт': Icons.handyman,
     'Консультация': Icons.question_mark,
+    'Гидрант': Icons.water_drop,
+    'Другое': Icons.category,
   };
   
   // Фильтрованный список заказов
@@ -382,7 +372,12 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
   SortType _sortType = SortType.dateDesc;
   
   // Индикатор загрузки
-  bool _isLoading = false;
+  bool _isLoading = true;
+  
+  // Кэш сервисов и категорий для уменьшения запросов к Firestore
+  Map<String, String> _servicesCategoryCache = {};
+  Map<String, String> _categoriesNameCache = {};
+  bool _categoriesLoaded = false;
   
   @override
   void initState() {
@@ -404,10 +399,14 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
         curve: Curves.elasticOut, // Изменяем кривую анимации для эффекта "отскока"
       );
       
-      // Затем устанавливаем даты и фильтруем заказы
+      // Затем устанавливаем даты и загружаем реальные заказы
       _startDate = DateTime.now().subtract(const Duration(days: 7));
       _endDate = DateTime.now();
-      _filterOrders();
+      
+      // Загружаем категории перед загрузкой заказов
+      _loadCategories().then((_) {
+        _loadOrdersFromFirestore();
+      });
       
       // Запускаем анимацию
       _animationController.forward();
@@ -416,8 +415,111 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
   
   @override
   void dispose() {
+    // Отписываемся от всех подписок Firestore
+    _activeOrdersSubscription?.cancel();
+    _historyOrdersSubscription?.cancel();
     _animationController.dispose();
     super.dispose();
+  }
+  
+  // Метод для загрузки заказов из Firestore
+  Future<void> _loadOrdersFromFirestore() async {
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      final user = AuthService().currentUser;
+      if (user == null) {
+        setState(() {
+          _isLoading = false;
+          allOrders = [];
+          historyOrders = [];
+          _filteredOrders = [];
+        });
+        return;
+      }
+      
+      // Получаем имя пользователя для проверки поля assignedToName
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      String engineerName = "";
+      if (userDoc.exists) {
+        engineerName = userDoc.data()?['name'] ?? "";
+      }
+      
+      print('Загрузка доходов для инженера с ID: ${user.uid}, имя: $engineerName');
+      
+      // Отписываемся от предыдущих подписок
+      _activeOrdersSubscription?.cancel();
+      _historyOrdersSubscription?.cancel();
+      
+      // Загружаем активные заказы
+      _activeOrdersSubscription = FirebaseFirestore.instance
+          .collection('orders')
+          .where('assignedTo', isEqualTo: user.uid)
+          .orderBy('lastUpdated', descending: true)
+          .snapshots()
+          .listen((snapshot) {
+            List<IncomeItem> orders = [];
+            for (var doc in snapshot.docs) {
+              try {
+                final item = IncomeItem.fromFirestore(doc);
+                orders.add(item);
+              } catch (e) {
+                print('Ошибка при обработке активного заказа ${doc.id}: $e');
+              }
+            }
+            
+            setState(() {
+              allOrders = [...orders, ...historyOrders];
+              _filterOrders();
+            });
+          }, onError: (error) {
+            print('Ошибка при загрузке активных заказов: $error');
+          });
+      
+      // Загружаем заказы из истории
+      _historyOrdersSubscription = FirebaseFirestore.instance
+          .collection('order_history')
+          .where('assignedTo', isEqualTo: user.uid)
+          .orderBy('completedAt', descending: true)
+          .snapshots()
+          .listen((snapshot) {
+            List<IncomeItem> orders = [];
+            for (var doc in snapshot.docs) {
+              try {
+                final item = IncomeItem.fromFirestore(doc);
+                orders.add(item);
+              } catch (e) {
+                print('Ошибка при обработке заказа из истории ${doc.id}: $e');
+              }
+            }
+            
+            setState(() {
+              historyOrders = orders;
+              allOrders = [...allOrders.where((o) => 
+                  // Фильтруем активные заказы, чтобы удалить те, которые уже есть в истории
+                  !historyOrders.any((h) => h.id == o.id || h.id == 'history_${o.id}')), 
+                ...historyOrders];
+              _filterOrders();
+              _isLoading = false;
+            });
+          }, onError: (error) {
+            print('Ошибка при загрузке заказов из истории: $error');
+            setState(() {
+              _isLoading = false;
+            });
+          });
+    } catch (e) {
+      print('Ошибка при загрузке заказов: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
   
   // Фильтрация и сортировка заказов
@@ -640,7 +742,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                '${activeTask.cost.toStringAsFixed(2)} \$',
+                                '${activeTask.cost.toStringAsFixed(2)} ₽',
                                 style: const TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
@@ -742,12 +844,76 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                         ],
                       ),
                     )
-                  : ListView.builder(
+                  : RefreshIndicator(
+                      onRefresh: _loadOrdersFromFirestore,
+                      color: const Color(0xFFD04E4E),
+                      child: ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       itemCount: _filteredOrders.length,
                       itemBuilder: (context, index) {
                         final order = _filteredOrders[index];
                         final isExpanded = _expandedCards[order.id] ?? false;
+                          return _buildOrderCard(order, isExpanded);
+                        },
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  // Обновляю метод _buildDetailRow для более гибкого отображения деталей заказа и избежания переполнения
+  Widget _buildDetailRow(String label, String value, IconData icon, {Color? textColor}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: Colors.grey[600],
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 80,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 13,
+                color: textColor ?? Colors.black87,
+                fontWeight: FontWeight.w400,
+              ),
+              overflow: TextOverflow.visible,
+              softWrap: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // Обновленный метод для отображения карточки заказа с реальными данными
+  Widget _buildOrderCard(IncomeItem order, bool isExpanded) {
+    final Color categoryColor = _getCategoryColor(order.category);
+    final IconData categoryIcon = _getCategoryIcon(order.category);
+    
+    // Сокращаем идентификатор заказа для отображения
+    final String shortOrderId = order.id.length > 8 
+        ? '${order.id.substring(0, 8)}...'
+        : order.id;
                         
                         return Card(
                           margin: const EdgeInsets.only(bottom: 8),
@@ -768,7 +934,8 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Row(
+                  Expanded(
+                    child: Row(
                                         children: [
                                           Container(
                                             padding: const EdgeInsets.all(5),
@@ -787,14 +954,18 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                                             ),
                                           ),
                                           const SizedBox(width: 8),
-                                          Text(
-                                            'Заказ №${order.id}',
+                        Expanded(
+                          child: Text(
+                            'Заказ №$shortOrderId',
                                             style: const TextStyle(
                                               fontSize: 15,
                                               fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
                                         ],
+                    ),
                                       ),
                                       Row(
                                         children: [
@@ -803,7 +974,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                                             style: TextStyle(
                                               fontSize: 15,
                                               fontWeight: FontWeight.w600,
-                                              color: categoryColors[order.category] ?? const Color(0xFF8A77FF),
+                          color: categoryColor,
                                             ),
                                           ),
                                           const SizedBox(width: 6),
@@ -850,9 +1021,9 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                                           ),
                                           _buildDetailRow(
                                             'Категория', 
-                                            order.category,
-                                            categoryIcons[order.category] ?? Icons.category,
-                                            textColor: categoryColors[order.category],
+                        _getCategory(order.category),
+                        categoryIcon,
+                        textColor: categoryColor,
                                           ),
                                           _buildDetailRow(
                                             'Адрес', 
@@ -871,7 +1042,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                                           ),
                                           _buildDetailRow(
                                             'Статус', 
-                                            order.completed ? 'Выполнен' : 'В процессе',
+                        order.completed ? 'Выполнен' : order.status.isEmpty ? 'В процессе' : order.status,
                                             Icons.check_circle_outline,
                                             textColor: order.completed ? Colors.green : Colors.orange,
                                           ),
@@ -883,52 +1054,6 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                             ),
                           ),
                         );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-  
-  // Строка детализации заказа
-  Widget _buildDetailRow(String label, String value, IconData icon, {Color? textColor}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            icon,
-            size: 16,
-            color: Colors.grey[600],
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 80,
-        child: Text(
-          label,
-          style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey[700],
-            fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: 13,
-                color: textColor ?? Colors.black87,
-                fontWeight: FontWeight.w400,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
   
   // Выбор диапазона дат
@@ -1113,10 +1238,34 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
     }
   }
   
-  // Форматируем дату как e.g. Apr 27
+  // Форматирование даты
   String _formatDate(DateTime date) {
-    final DateFormat formatter = DateFormat('d MMM', 'ru');
-    return formatter.format(date);
+    return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}';
+  }
+  
+  // Вспомогательный метод для парсинга дат в формате DD.MM.YYYY
+  DateTime _parseDate(String dateStr) {
+    try {
+      // Если дата в формате "Дата не указана" или другом некорректном формате
+      if (dateStr == 'Дата не указана' || dateStr.isEmpty) {
+        return DateTime(1970);  // Возвращаем старую дату
+      }
+      
+      // Разбиваем строку по разделителю
+      final parts = dateStr.split('.');
+      if (parts.length == 3) {
+        final day = int.parse(parts[0]);
+        final month = int.parse(parts[1]);
+        final year = int.parse(parts[2]);
+        return DateTime(year, month, day);
+      }
+      
+      // Если формат не соответствует ожидаемому, возвращаем текущую дату
+      return DateTime.now();
+    } catch (e) {
+      print('Ошибка при парсинге даты "$dateStr": $e');
+      return DateTime.now();
+    }
   }
   
   // Быстрый выбор периода
@@ -1128,7 +1277,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
           _endDate = DateTime.now();
           _isDayMode = true;
           _currentPeriod = 'День';
-          break;
+            break;
         case 'Неделя':
           _startDate = DateTime.now().subtract(const Duration(days: 7));
           _endDate = DateTime.now();
@@ -1140,13 +1289,13 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
           _endDate = DateTime.now();
           _isDayMode = false;
           _currentPeriod = 'Месяц';
-          break;
-        case 'Год':
+            break;
+          case 'Год':
           _startDate = DateTime(DateTime.now().year, 1, 1);
           _endDate = DateTime.now();
           _isDayMode = false;
           _currentPeriod = 'Год';
-          break;
+            break;
       }
       _filterOrders();
     });
@@ -1167,63 +1316,215 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
     });
   }
   
-  // Генерация данных для Syncfusion DoughnutChart
+  // Генерация данных для Syncfusion DoughnutChart из реальных данных
   List<_ChartData> _generateChartData() {
-    final Map<String, double> categoryAmounts = {};
+    Map<String, double> categoryAmounts = {};
+    
+    // Собираем суммы по категориям из отфильтрованных заказов
     for (var order in _filteredOrders) {
-      categoryAmounts[order.category] = (categoryAmounts[order.category] ?? 0) + order.amount;
+      // Нормализуем название категории для объединения похожих категорий
+      String normalizedCategory = _getCategory(order.category);
+      
+      // Добавляем или обновляем сумму для этой категории
+      categoryAmounts[normalizedCategory] = (categoryAmounts[normalizedCategory] ?? 0) + order.amount;
     }
+    
+    // Преобразуем данные в формат для диаграммы
     return categoryAmounts.entries
         .map((e) => _ChartData(e.key, e.value))
         .toList();
   }
-
-  // Новый виджет для иконки категории
-  Widget _buildChartIcon(String category) {
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Container(
-            width: 20,
-            height: 20,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.grey, width: 1),
-            ),
-          ),
-          Icon(
-            categoryIcons[category] ?? Icons.category,
-            color: categoryColors[category] ?? Colors.grey,
-            size: 16,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Метод для создания списка иконки категорий
-  List<Widget> _buildChartIcons() {
-    List<Widget> icons = [];
-    for (var category in categoryIcons.keys) {
-      icons.add(_buildChartIcon(category));
+  
+  // Метод для нормализации названий категорий
+  String _getCategory(String serviceTitle) {
+    // Отладочная информация для диагностики
+    print('Определение категории для услуги: "$serviceTitle"');
+    
+    // Если сервис не указан, возвращаем "Другое"
+    if (serviceTitle.isEmpty || serviceTitle == 'Не указана') {
+      print('Пустое название услуги, возвращаем категорию "Другое"');
+      return 'Другое';
     }
-    return icons;
+    
+    // Убедимся, что категории загружены
+    if (!_categoriesLoaded) {
+      print('Категории не загружены, используем резервный метод');
+      return _fallbackCategoryNormalization(serviceTitle);
+    }
+    
+    try {
+      // Приводим название услуги к нижнему регистру для поиска
+      final title = serviceTitle.toLowerCase().trim();
+      print('Нормализованное название услуги: "$title"');
+      
+      // Шаг 1: Проверяем, есть ли точное совпадение названия услуги
+      if (_servicesCategoryCache.containsKey(title)) {
+        final categoryId = _servicesCategoryCache[title]!;
+        print('Найдено точное совпадение, categoryId = $categoryId');
+        
+        // Получаем название категории по ID
+        if (_categoriesNameCache.containsKey(categoryId)) {
+          final categoryName = _categoriesNameCache[categoryId]!;
+          print('Определена категория по точному совпадению: "$categoryName"');
+          return categoryName;
+        } else {
+          // Если категории нет в кэше, запрашиваем ее напрямую из Firestore
+          print('Категория с ID $categoryId не найдена в кэше, запрашиваем из Firestore');
+          
+          // Запрашиваем категорию напрямую (но возвращаем временное значение пока запрос выполняется)
+          _loadCategoryNameFromFirestore(categoryId);
+          
+          // Возвращаем временное значение (если в будущем хотим сделать ожидание, то это место нужно изменить)
+          return 'Загрузка...';
+        }
+      }
+      
+      // Шаг 2: Ищем частичное совпадение в названиях услуг
+      List<MapEntry<String, String>> matchedServices = [];
+      
+      for (final entry in _servicesCategoryCache.entries) {
+        final serviceName = entry.key;
+        final categoryId = entry.value;
+        
+        // Если название услуги содержит текущее название или наоборот
+        if (title.contains(serviceName) || serviceName.contains(title)) {
+          // Получаем название категории по ID
+          if (_categoriesNameCache.containsKey(categoryId)) {
+            matchedServices.add(
+              MapEntry(serviceName, categoryId)
+            );
+          }
+        }
+      }
+      
+      // Если нашли частичные совпадения, берем самое длинное совпадение
+      if (matchedServices.isNotEmpty) {
+        // Сортируем по длине названия услуги (более длинные названия имеют приоритет)
+        matchedServices.sort((a, b) => b.key.length.compareTo(a.key.length));
+        final bestMatch = matchedServices.first;
+        final categoryName = _categoriesNameCache[bestMatch.value]!;
+        print('Определена категория по частичному совпадению: "$categoryName"');
+        return categoryName;
+      }
+      
+      // Шаг 3: Если ничего не нашли, используем резервный метод
+      print('Категория не найдена в базе, используем резервный метод');
+      return _fallbackCategoryNormalization(serviceTitle);
+    } catch (e) {
+      print('Ошибка при определении категории: $e');
+      return _fallbackCategoryNormalization(serviceTitle);
+    }
+  }
+  
+  // Метод для загрузки названия категории напрямую из Firestore
+  Future<void> _loadCategoryNameFromFirestore(String categoryId) async {
+    try {
+      print('Запрашиваем категорию с ID $categoryId напрямую из Firestore');
+      
+      final categoryDoc = await FirebaseFirestore.instance
+          .collection('service_categories')  // Исправлено: было services_categories
+          .doc(categoryId)
+          .get();
+      
+      print('Получен документ категории: ${categoryDoc.id}, существует: ${categoryDoc.exists}');
+      
+      if (categoryDoc.exists) {
+        final data = categoryDoc.data();
+        print('Данные категории: ${data.toString()}');
+        
+        if (data != null) {
+          // Проверяем все возможные поля, которые могут содержать имя категории
+          String? categoryName;
+          
+          if (data['name'] != null) {
+            categoryName = data['name'] as String;
+          } else if (data['title'] != null) {
+            categoryName = data['title'] as String;
+          } else if (data['category'] != null) {
+            categoryName = data['category'] as String;
+          }
+          
+          if (categoryName != null && categoryName.isNotEmpty) {
+            print('Загружена категория с ID $categoryId: "$categoryName"');
+            
+            // Сохраняем категорию в кэш
+            _categoriesNameCache[categoryId] = categoryName;
+            
+            // Перестраиваем UI
+            if (mounted) {
+              setState(() {});
+            }
+          } else {
+            print('Категория с ID $categoryId не содержит подходящего поля для имени');
+            _categoriesNameCache[categoryId] = 'Категория $categoryId';
+          }
+        } else {
+          print('Категория с ID $categoryId не содержит данных');
+        }
+      } else {
+        print('Категория с ID $categoryId не найдена в Firestore');
+      }
+    } catch (e) {
+      print('Ошибка при загрузке категории $categoryId: $e');
+    }
+  }
+  
+  // Резервный метод нормализации категории на основе ключевых слов
+  String _fallbackCategoryNormalization(String category) {
+    // Приводим к нижнему регистру для удобства сравнения
+    final lowerCategory = category.toLowerCase();
+    
+    // Проверяем на ключевые слова для определения категории
+    if (lowerCategory.contains('обслуж') || lowerCategory.contains('сервис')) {
+      return 'Обслуживание';
+    } else if (lowerCategory.contains('установ') || lowerCategory.contains('монтаж')) {
+      return 'Установка';
+    } else if (lowerCategory.contains('ремонт') || lowerCategory.contains('починк')) {
+      return 'Ремонт';
+    } else if (lowerCategory.contains('консульт') || lowerCategory.contains('осмотр')) {
+      return 'Консультация';
+    } else if (lowerCategory.contains('гидрант')) {
+      return 'Гидрант';
+    } else {
+      return 'Другое';
+    }
+  }
+  
+  // Метод для получения цвета категории с дополнительной проверкой
+  Color _getCategoryColor(String category) {
+    final normalizedCategory = _getCategory(category);
+    return categoryColors[normalizedCategory] ?? const Color(0xFF8A77FF); // Фиолетовый по умолчанию
+  }
+  
+  // Метод для получения иконки категории с дополнительной проверкой
+  IconData _getCategoryIcon(String category) {
+    final normalizedCategory = _getCategory(category);
+    return categoryIcons[normalizedCategory] ?? Icons.category; // Иконка категории по умолчанию
   }
 
-  // Метод для построения списка категорий доходов
+  // Метод для построения списка категорий доходов с реальными данными
   Widget _buildCategoryIncomeList() {
     // Создаем Map для хранения суммы по каждой категории
     final Map<String, double> categoryTotals = {};
     
     // Вычисляем сумму для каждой категории
     for (var order in _filteredOrders) {
-      categoryTotals[order.category] = (categoryTotals[order.category] ?? 0) + order.amount;
+      final normalizedCategory = _getCategory(order.category);
+      categoryTotals[normalizedCategory] = (categoryTotals[normalizedCategory] ?? 0) + order.amount;
+    }
+    
+    // Если категорий нет, показываем сообщение
+    if (categoryTotals.isEmpty) {
+      return const Center(
+        child: Text(
+          'Нет данных о категориях доходов за выбранный период',
+          style: TextStyle(
+            color: Colors.grey,
+            fontSize: 14,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      );
     }
     
     // Создаем список категорий для отображения
@@ -1247,27 +1548,27 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
             ),
           ),
           child: Row(
-          children: [
+            children: [
               // Иконка категории
-            Container(
+              Container(
                 padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
+                decoration: BoxDecoration(
                   color: (categoryColors[category] ?? Colors.grey).withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
+                  shape: BoxShape.circle,
+                ),
                 child: Icon(
                   categoryIcons[category] ?? Icons.category,
                   color: categoryColors[category] ?? Colors.grey,
                   size: 18,
-                ),
+              ),
               ),
               const SizedBox(width: 12),
               // Название категории
               Expanded(
                 child: Text(
                   category,
-              style: const TextStyle(
-                fontWeight: FontWeight.w500,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w500,
                     fontSize: 14,
                   ),
                 ),
@@ -1374,10 +1675,10 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
+            children: [
             Text(
               title,
-              style: TextStyle(
+                  style: TextStyle(
                 fontSize: 16,
                 color: _sortType == type ? const Color(0xFFD04E4E) : Colors.black,
                 fontWeight: _sortType == type ? FontWeight.bold : FontWeight.normal,
@@ -1392,6 +1693,92 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
         ),
       ),
     );
+  }
+  
+  // Метод для загрузки категорий из Firestore
+  Future<void> _loadCategories() async {
+    try {
+      print('Загрузка категорий из Firestore...');
+      
+      // Сначала очищаем кэши, чтобы избежать устаревших данных
+      _servicesCategoryCache.clear();
+      _categoriesNameCache.clear();
+      
+      // Загружаем соответствие услуг и категорий
+      final servicesSnapshot = await FirebaseFirestore.instance
+          .collection('services')
+          .get();
+      
+      print('Загружено услуг: ${servicesSnapshot.docs.length}');
+      
+      for (final doc in servicesSnapshot.docs) {
+        final data = doc.data();
+        final String title = data['title'] ?? '';
+        final String categoryId = data['categoryId'] ?? '';
+        
+        print('Обработка услуги: id=${doc.id}, title=$title, categoryId=$categoryId');
+        
+        if (title.isNotEmpty && categoryId.isNotEmpty) {
+          _servicesCategoryCache[title.toLowerCase()] = categoryId;
+        }
+      }
+      
+      print('Загружено сопоставлений услуг и категорий: ${_servicesCategoryCache.length}');
+      
+      // Загружаем категории
+      final categoriesSnapshot = await FirebaseFirestore.instance
+          .collection('service_categories')  // Исправлено: было services_categories
+          .get();
+      
+      print('Загружено документов categories: ${categoriesSnapshot.docs.length}');
+      
+      for (final doc in categoriesSnapshot.docs) {
+        final data = doc.data();
+        print('Категория ${doc.id}: ${data.toString()}');
+        
+        final String categoryName = data['name'] ?? '';
+        
+        if (categoryName.isNotEmpty) {
+          print('Сохраняем категорию ${doc.id} с именем $categoryName');
+          _categoriesNameCache[doc.id] = categoryName;
+        } else {
+          print('Категория ${doc.id} не имеет поля name или оно пустое: ${data.toString()}');
+        }
+      }
+      
+      print('Загружено категорий: ${_categoriesNameCache.length}');
+      
+      // Выводим содержимое кэшей для диагностики
+      print('--- Содержимое кэша услуг ---');
+      _servicesCategoryCache.forEach((key, value) {
+        print('Услуга: "$key" -> CategoryID: "$value"');
+      });
+      
+      print('--- Содержимое кэша категорий ---');
+      _categoriesNameCache.forEach((key, value) {
+        print('CategoryID: "$key" -> Название: "$value"');
+      });
+      
+      // Проверяем наличие конкретной категории
+      if (_categoriesNameCache.containsKey('MpEM9cBuiHBwg1cjQhcR')) {
+        print('Категория MpEM9cBuiHBwg1cjQhcR найдена: ${_categoriesNameCache['MpEM9cBuiHBwg1cjQhcR']}');
+      } else {
+        print('Категория MpEM9cBuiHBwg1cjQhcR НЕ найдена в кэше');
+        
+        // Попробуем загрузить ее напрямую
+        await _loadCategoryNameFromFirestore('MpEM9cBuiHBwg1cjQhcR');
+      }
+      
+      _categoriesLoaded = true;
+      
+      // Обновляем UI после загрузки
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      print('Ошибка при загрузке категорий: $e');
+      _categoriesLoaded = false;
+    }
   }
 }
 
@@ -1449,6 +1836,7 @@ class IncomeItem {
   final String description;
   final bool completed;
   final String category;
+  final String status;
 
   IncomeItem({
     required this.id,
@@ -1459,7 +1847,47 @@ class IncomeItem {
     required this.description,
     required this.completed,
     required this.category,
+    required this.status,
   });
+
+  // Фабричный метод для создания объекта из Firestore документа
+  factory IncomeItem.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    
+    // Определяем дату заказа
+    DateTime orderDate;
+    if (data['completedAt'] != null) {
+      orderDate = (data['completedAt'] as Timestamp).toDate();
+    } else if (data['createdAt'] != null) {
+      orderDate = (data['createdAt'] as Timestamp).toDate();
+    } else if (data['lastUpdated'] != null) {
+      orderDate = (data['lastUpdated'] as Timestamp).toDate();
+    } else {
+      orderDate = DateTime.now();
+    }
+    
+    // Определяем название услуги для дальнейшего определения категории
+    String serviceTitle = data['title'] ?? '';
+    if (serviceTitle.isEmpty) {
+      serviceTitle = data['service'] ?? 'Не указана';
+    }
+    
+    // Определяем статус и завершенность заказа
+    final String status = data['status'] ?? '';
+    final bool isCompleted = status == 'выполнен';
+    
+    return IncomeItem(
+      id: doc.id,
+      amount: data['price'] is num ? (data['price'] as num).toDouble() : 0.0,
+      date: orderDate,
+      address: data['address'] ?? 'Адрес не указан',
+      clientName: data['userName'] ?? data['clientName'] ?? 'Клиент не указан',
+      description: data['additionalInfo'] ?? data['description'] ?? 'Нет описания',
+      completed: isCompleted,
+      category: serviceTitle, // Сохраняем оригинальное название услуги
+      status: status,
+    );
+  }
 }
 
 // Экран истории заказов инженера
@@ -1509,51 +1937,109 @@ class _EngineerHistoryScreenState extends State<EngineerHistoryScreen> {
       return;
     }
     
+    print('==== ЗАГРУЗКА ИСТОРИИ ЗАКАЗОВ ИНЖЕНЕРА ====');
+    print('Текущий пользователь: ID=${user.uid}, DisplayName=${user.displayName}');
+    
     try {
       // Отменяем предыдущую подписку
       _historySubscription?.cancel();
       
-      // Подписываемся на обновления коллекции order_history
-      _historySubscription = FirebaseFirestore.instance
+      // Создаем список для хранения всех элементов истории
+      List<HistoryItem> allHistoryItems = [];
+      
+      // 1. Сначала проверяем основную коллекцию orders на заказы со статусом "выполнен" или "отменен"
+      final ordersSnapshot = await FirebaseFirestore.instance
+          .collection('orders')
+          .where('assignedTo', isEqualTo: user.uid) // Строгое соответствие по UID инженера
+          .where('status', whereIn: ['выполнен', 'отменен']) // Только выполненные или отмененные заказы
+          .get();
+          
+      print('Найдено выполненных/отмененных заказов в коллекции orders с ID=${user.uid}: ${ordersSnapshot.docs.length}');
+      
+      // Преобразуем заказы из основной коллекции
+      for (var doc in ordersSnapshot.docs) {
+        final data = doc.data();
+        final String status = data['status'] ?? '';
+        
+        print('Найден заказ для инженера: ${doc.id}, статус: $status');
+        
+        // Преобразуем заказ в элемент истории
+        final completedAt = data['completedAt'] != null ? 
+            (data['completedAt'] as Timestamp).toDate() : 
+            DateTime.now();
+          
+        allHistoryItems.add(HistoryItem(
+          id: doc.id,
+          clientName: data['userName'] ?? data['clientName'] ?? 'Неизвестный клиент',
+          service: data['title'] ?? 'Услуга не указана',
+          address: data['address'] ?? 'Адрес не указан',
+          status: status == 'выполнен' ? 'Выполнено' : 'Отменено',
+          price: data['price'] is num ? (data['price'] as num).toDouble() : 0.0,
+          date: '${completedAt.day.toString().padLeft(2, '0')}.${completedAt.month.toString().padLeft(2, '0')}.${completedAt.year}',
+        ));
+      }
+      
+      // 2. Затем проверяем коллекцию order_history
+      final historySnapshot = await FirebaseFirestore.instance
           .collection('order_history')
-          .where(Filter.or(
-            Filter('assignedTo', isEqualTo: user.uid),
-            Filter('assignedToName', isEqualTo: user.displayName ?? '')
-          ))
+          .where('assignedTo', isEqualTo: user.uid) // Строгое соответствие по UID инженера
           .orderBy('completedAt', descending: true)
-          .snapshots()
-          .listen((snapshot) {
-            if (!mounted) return;
-            
-            final items = snapshot.docs.map((doc) {
-              final data = doc.data();
-              return HistoryItem(
-                id: doc.id,
-                clientName: data['userName'] ?? data['clientName'] ?? 'Неизвестный клиент',
-                service: data['title'] ?? 'Услуга не указана',
-                address: data['address'] ?? 'Адрес не указан',
-                status: data['status'] == 'выполнен' ? 'Выполнено' : 'Отменено',
-                price: data['price'] is num ? (data['price'] as num).toDouble() : 0.0,
-                date: data['completedAt'] != null ? 
-                  _formatDate((data['completedAt'] as Timestamp).toDate()) : 
-                  'Дата не указана',
-              );
-            }).toList();
-            
-            setState(() {
-              historyItems = items;
-              _isLoading = false;
-            });
-          }, onError: (error) {
-            print('Ошибка при загрузке истории: $error');
-            if (!mounted) return;
-            
-            setState(() {
-              _isLoading = false;
-            });
-          });
+          .limit(100)
+          .get();
+      
+      print('Найдено записей в коллекции order_history для ID=${user.uid}: ${historySnapshot.docs.length}');
+      
+      // Преобразуем записи из коллекции истории
+      for (var doc in historySnapshot.docs) {
+        final data = doc.data();
+        final String status = data['status'] ?? '';
+        
+        // Добавляем только записи со статусом "выполнен" или "отменен"
+        if (status == 'выполнен' || status == 'отменен') {
+          print('Найдена запись истории для инженера: ${doc.id}, статус: $status');
+          
+          final completedAt = data['completedAt'] != null ? 
+              (data['completedAt'] as Timestamp).toDate() : 
+              null;
+              
+          final dateStr = completedAt != null ? 
+              '${completedAt.day.toString().padLeft(2, '0')}.${completedAt.month.toString().padLeft(2, '0')}.${completedAt.year}' : 
+              'Дата не указана';
+          
+          // Добавляем запись в общий список
+          allHistoryItems.add(HistoryItem(
+            id: doc.id,
+            clientName: data['userName'] ?? data['clientName'] ?? 'Неизвестный клиент',
+            service: data['title'] ?? 'Услуга не указана',
+            address: data['address'] ?? 'Адрес не указан',
+            status: status == 'выполнен' ? 'Выполнено' : 'Отменено',
+            price: data['price'] is num ? (data['price'] as num).toDouble() : 0.0,
+            date: dateStr,
+          ));
+        }
+      }
+      
+      // Сортируем все элементы по убыванию даты (самые последние - первые)
+      allHistoryItems.sort((a, b) {
+        try {
+          // Преобразуем строковые даты в объекты DateTime для корректного сравнения
+          final dateA = _parseDate(a.date);
+          final dateB = _parseDate(b.date);
+          return dateB.compareTo(dateA);  // Сравниваем в обратном порядке
+        } catch (e) {
+          return 0;  // В случае ошибки парсинга считаем даты равными
+        }
+      });
+      
+      print('Всего элементов истории после объединения: ${allHistoryItems.length}');
+      
+      // Обновляем UI с объединенным списком истории
+      setState(() {
+        historyItems = allHistoryItems;
+        _isLoading = false;
+      });
     } catch (e) {
-      print('Ошибка при настройке подписки: $e');
+      print('Ошибка при загрузке истории: $e');
       if (!mounted) return;
       
       setState(() {
@@ -1562,9 +2048,29 @@ class _EngineerHistoryScreenState extends State<EngineerHistoryScreen> {
     }
   }
   
-  // Форматирование даты
-  String _formatDate(DateTime date) {
-    return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}';
+  // Вспомогательный метод для парсинга дат в формате DD.MM.YYYY
+  DateTime _parseDate(String dateStr) {
+    try {
+      // Если дата в формате "Дата не указана" или другом некорректном формате
+      if (dateStr == 'Дата не указана' || dateStr.isEmpty) {
+        return DateTime(1970);  // Возвращаем старую дату
+      }
+      
+      // Разбиваем строку по разделителю
+      final parts = dateStr.split('.');
+      if (parts.length == 3) {
+        final day = int.parse(parts[0]);
+        final month = int.parse(parts[1]);
+        final year = int.parse(parts[2]);
+        return DateTime(year, month, day);
+      }
+      
+      // Если формат не соответствует ожидаемому, возвращаем текущую дату
+      return DateTime.now();
+    } catch (e) {
+      print('Ошибка при парсинге даты "$dateStr": $e');
+      return DateTime.now();
+    }
   }
   
   // Переключение состояния раскрытой карточки
@@ -1636,107 +2142,88 @@ class _EngineerHistoryScreenState extends State<EngineerHistoryScreen> {
     final bool isCompleted = item.status == 'Выполнено';
     final Color statusColor = isCompleted ? Colors.green : Colors.red;
     
+    // Сокращаем ID заказа для более компактного отображения
+    final String shortId = item.id.length > 8 
+        ? item.id.substring(0, 8) + '...' 
+        : item.id;
+    
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
       ),
       child: InkWell(
         onTap: () => _toggleCardExpanded(item.id + item.date),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.grey[200],
             borderRadius: BorderRadius.circular(12),
-          ),
           child: Column(
             children: [
-              // Верхняя часть карточки (всегда видна)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Заказ №${item.id}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  AnimatedRotation(
-                    turns: isExpanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: const Icon(
-                      Icons.keyboard_arrow_down,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ],
+            // Заголовок заказа (всегда виден)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: isCompleted ? const Color(0xFFE8F5E9) : const Color(0xFFFBE9E7),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.circular(12),
+                  bottomLeft: isExpanded ? Radius.zero : Radius.circular(12),
+                  bottomRight: isExpanded ? Radius.zero : Radius.circular(12),
+                ),
               ),
-              
-              // Содержимое карточки
-              AnimatedCrossFade(
-                firstChild: const SizedBox(height: 0),
-                secondChild: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      isCompleted ? Icons.check_circle : Icons.cancel,
+                      color: statusColor,
+                      size: 16,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'ФИО клиента: ${item.clientName}',
+                          "Заказ №$shortId",
                                 style: const TextStyle(
-                                  fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
                                 ),
                               ),
-                              const SizedBox(height: 4),
+                        const SizedBox(height: 2),
                               Text(
-                                'Услуга: ${item.service}',
+                          item.date,
                                 style: const TextStyle(
-                                  fontSize: 14,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                item.address,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                                   Row(
                                     children: [
                                       Text(
-                                        'Статус: ',
+                        "${item.price.toStringAsFixed(1)} ₽",
                                         style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      Text(
-                                        item.status,
-                                        style: TextStyle(
-                                          fontSize: 14,
+                          fontSize: 15,
                                           fontWeight: FontWeight.bold,
                                           color: statusColor,
                                         ),
                                       ),
-                                    ],
-                                  ),
-                                  Text(
-                                    '${item.price} \$',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                      color: statusColor,
+                      const SizedBox(width: 8),
+                      AnimatedRotation(
+                        turns: isExpanded ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 200),
+                        child: Icon(
+                          Icons.keyboard_arrow_down,
+                          color: Colors.grey[600],
                                     ),
                                   ),
                                 ],
@@ -1744,75 +2231,103 @@ class _EngineerHistoryScreenState extends State<EngineerHistoryScreen> {
                             ],
                           ),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8.0),
-                          child: Text(
-                            item.date,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+            
+            // Детали заказа (видны только при развороте)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              height: isExpanded ? null : 0,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(12),
+                  bottomRight: Radius.circular(12),
                 ),
-                crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                duration: const Duration(milliseconds: 300),
               ),
-              
-              // Компактное содержимое (когда не развернуто)
-              if (!isExpanded)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
+              child: isExpanded 
+                ? Container(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
                       children: [
-                        Text(
-                          'Статус: ',
-                          style: TextStyle(
-                            fontSize: 14,
-                          ),
+                        _buildDetailRow(
+                          Icons.person, 
+                          'Клиент', 
+                          item.clientName,
                         ),
-                        Text(
+                        _buildDetailRow(
+                          Icons.home_repair_service, 
+                          'Услуга', 
+                          item.service,
+                        ),
+                        _buildDetailRow(
+                          Icons.location_on, 
+                          'Адрес', 
+                          item.address,
+                        ),
+                        _buildDetailRow(
+                          Icons.assignment_turned_in, 
+                          'Статус', 
                           item.status,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: statusColor,
-                          ),
+                          valueColor: statusColor,
+                        ),
+                        _buildDetailRow(
+                          Icons.attach_money, 
+                          'Стоимость', 
+                          "${item.price.toStringAsFixed(1)} ₽",
+                          valueColor: statusColor,
                         ),
                       ],
                     ),
-                    Row(
-                      children: [
-                        Text(
-                          '${item.price} \$',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: statusColor,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          item.date,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ],
+                  )
+                : const SizedBox(),
                     ),
                   ],
                 ),
-            ],
-          ),
-        ),
       ),
     );
   }
+  
+  // Вспомогательный метод для построения строки с деталями
+  Widget _buildDetailRow(IconData icon, String label, String value, {Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+          Icon(
+            icon,
+            size: 18,
+            color: Colors.grey[600],
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 80,
+            child: Text(
+              label + ":",
+                          style: TextStyle(
+                            fontSize: 14,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+                          style: TextStyle(
+                            fontSize: 14,
+                color: valueColor ?? Colors.black87,
+                fontWeight: valueColor != null ? FontWeight.w500 : FontWeight.normal,
+              ),
+              overflow: TextOverflow.visible,
+              softWrap: true,
+                          ),
+                        ),
+                      ],
+      ),
+    );
+  }
+
+  
 }
 
 // Модель элемента истории
@@ -2241,24 +2756,69 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
         engineerName = userDoc.data()?['name'] ?? "";
       }
       
+      print('=========== ДИАГНОСТИКА ЗАГРУЗКИ ЗАКАЗОВ ===========');
       print('Загрузка заказов для инженера с ID: $engineerId и именем: $engineerName');
       
-      // Подписываемся на заказы, назначенные этому инженеру по ID или имени
+      // Проверим конкретный документ, который видели на скриншоте
+      try {
+        final specificDoc = await FirebaseFirestore.instance
+            .collection('orders')
+            .doc('HPaSbDSsxJHRBaYXAHud')
+            .get();
+            
+        if (specificDoc.exists) {
+          final data = specificDoc.data()!;
+          print('ПРОВЕРКА ДОКУМЕНТА HPaSbDSsxJHRBaYXAHud:');
+          print('- assignedTo: "${data['assignedTo']}"');
+          print('- assignedToName: "${data['assignedToName']}"');
+          print('- status: "${data['status']}"');
+          print('- этот заказ назначен текущему инженеру: ${data['assignedTo'] == engineerId || data['assignedToName'] == engineerName}');
+        } else {
+          print('Документ HPaSbDSsxJHRBaYXAHud не найден!');
+        }
+      } catch (e) {
+        print('Ошибка при проверке конкретного документа: $e');
+      }
+      
+      // Подписываемся на заказы, модифицируем запрос для обхода необходимости составных индексов
       _ordersSubscription = FirebaseFirestore.instance
           .collection('orders')
-          .where(Filter.or(
-            Filter('assignedTo', isEqualTo: engineerId),
-            Filter('assignedToName', isEqualTo: engineerName)
-          ))
           .orderBy('lastUpdated', descending: true)
+          .limit(50) // Ограничиваем количество для производительности
           .snapshots()
           .listen((snapshot) {
             EngineerTask? activeTask;
             List<Notification> notifications = [];
             
-            print('Получено заказов: ${snapshot.docs.length}');
+            // Фильтруем документы на стороне клиента с более гибкой проверкой
+            final filteredDocs = snapshot.docs.where((doc) {
+              final data = doc.data();
+              
+              // Проверяем, назначен ли заказ текущему инженеру по ID или имени - более гибкая проверка
+              final String assignedTo = data['assignedTo'] ?? '';
+              final String assignedToName = data['assignedToName'] ?? '';
+              final String status = data['status'] ?? '';
+              
+              // Менее строгая проверка на соответствие
+              final bool isAssignedToUser = 
+                (assignedTo.isNotEmpty && (assignedTo.contains(engineerId) || engineerId.contains(assignedTo))) || 
+                (assignedToName.isNotEmpty && (assignedToName.contains(engineerName) || engineerName.contains(assignedToName)));
+              
+              // Если это конкретный документ, который нас интересует, выполним специальную проверку
+              if (doc.id == 'HPaSbDSsxJHRBaYXAHud') {
+                print('Проверка документа HPaSbDSsxJHRBaYXAHud в подписке:');
+                print('- assignedTo: "$assignedTo" (ожидается: "$engineerId")');
+                print('- assignedToName: "$assignedToName" (ожидается: "$engineerName")');
+                print('- status: "$status"');
+                print('- соответствие: $isAssignedToUser');
+              }
+              
+              return isAssignedToUser;
+            }).toList();
             
-            for (var doc in snapshot.docs) {
+            print('Всего заказов: ${snapshot.docs.length}, отфильтровано для инженера: ${filteredDocs.length}');
+            
+            for (var doc in filteredDocs) {
               try {
                 final data = doc.data() as Map<String, dynamic>;
                 
@@ -2275,12 +2835,8 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
                 }
                 
                 // Если заказ в процессе/назначен, устанавливаем его как активный
-                if (status == 'назначен' || 
-                    status == 'принят' || 
-                    status == 'выехал' || 
-                    status == 'прибыл' || 
-                    status == 'работает' || 
-                    status == 'в процессе') {
+                // Расширим список статусов для большей гибкости
+                if (['назначен', 'принят', 'выехал', 'прибыл', 'работает', 'в процессе'].any((s) => status.toLowerCase().contains(s.toLowerCase()))) {
                   // Берем только первый активный заказ (можно изменить логику при необходимости)
                   if (activeTask == null) {
                     activeTask = _convertToEngineerTask(doc.id, data);
@@ -2294,7 +2850,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
             // Проверяем, не был ли текущий активный заказ удален
             if (_activeTask != null) {
               bool activeTaskExists = false;
-              for (var doc in snapshot.docs) {
+              for (var doc in filteredDocs) {
                 if (doc.id == _activeTask!.id) {
                   activeTaskExists = true;
                   break;
@@ -3124,7 +3680,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      '${task.cost.toStringAsFixed(2)} \$',
+                      '${task.cost.toStringAsFixed(2)} ₽',
                 style: const TextStyle(
                         fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -3589,17 +4145,51 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
           .doc(orderId)
           .get();
       
-      if (!orderDoc.exists) return;
+      if (!orderDoc.exists) {
+        print('Ошибка: заказ $orderId не найден при попытке переместить его в историю');
+        return;
+      }
       
-      // Создаем запись в истории
+      // Получаем текущего пользователя
+      final user = AuthService().currentUser;
+      if (user == null) {
+        print('Ошибка: пользователь не авторизован при попытке переместить заказ $orderId в историю');
+        return;
+      }
+      
+      // Получаем данные пользователя из Firestore
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      String userName = '';
+      if (userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>?;
+        userName = userData?['name'] ?? '';
+      }
+      
+      // Получаем данные заказа
       final orderData = orderDoc.data()!;
-      await FirebaseFirestore.instance.collection('order_history').add({
+      
+      print('===== ПЕРЕМЕЩЕНИЕ ЗАКАЗА В ИСТОРИЮ =====');
+      print('Заказ ID: $orderId');
+      print('Текущий пользователь: ID=${user.uid}, DisplayName=$userName');
+      
+      // Создаем запись в истории с гарантированным сохранением информации о исполнителе
+      final historyRef = await FirebaseFirestore.instance.collection('order_history').add({
         ...orderData,
         'completedAt': FieldValue.serverTimestamp(),
         'originalOrderId': orderId,
-        'arrivalCode': orderData['arrivalCode'] ?? 'Не указан', // Явно копируем код прибытия
-        'completionCode': orderData['completionCode'] ?? 'Не указан', // Явно копируем код завершения
+        'arrivalCode': orderData['arrivalCode'] ?? 'Не указан',
+        'completionCode': orderData['completionCode'] ?? 'Не указан',
+        // Гарантированно устанавливаем UID и имя текущего инженера
+        'assignedTo': user.uid,
+        'assignedToName': userName,
+        'status': 'выполнен',
       });
+      
+      print('Заказ успешно сохранен в историю с ID: ${historyRef.id}');
       
       // Удаляем заказ из основной коллекции
       await FirebaseFirestore.instance
@@ -3607,7 +4197,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
           .doc(orderId)
           .delete();
       
-      print('Заказ $orderId успешно перемещен в историю');
+      print('Заказ $orderId успешно удален из основной коллекции');
     } catch (e) {
       print('Ошибка при перемещении заказа в историю: $e');
     }
@@ -3697,6 +4287,8 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
           break;
         case 'выполнен':
           newTaskStatus = TaskStatus.completed;
+          // Показываем модальное окно для оценки клиента
+          await _showClientRatingDialog(data['clientId'] ?? '', data['userName'] ?? 'Клиент', _activeTask!.id);
           break;
         default:
           newTaskStatus = TaskStatus.inProgress;
@@ -3727,28 +4319,34 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
       // Обновляем локальные данные
       setState(() {
         // Создаем обновленный таймлайн
-        Map<String, String> updatedTimeline = Map.from(_activeTask!.timeline);
+        Map<String, String> updatedTimeline = {};
+        if (_activeTask != null && _activeTask!.timeline != null) {
+          updatedTimeline = Map.from(_activeTask!.timeline);
+        }
         // Используем statusText как ключ для правильного отображения в таймлайне
         updatedTimeline[statusText] = formattedDateTime;
         
-        _activeTask = EngineerTask(
-          id: _activeTask!.id,
-          address: _activeTask!.address,
-          status: newTaskStatus,
-          clientName: _activeTask!.clientName,
-          phone: _activeTask!.phone,
-          description: _activeTask!.description,
-          cost: _activeTask!.cost,
-          timeline: updatedTimeline,
-          currentAction: nextAction,
-          clientId: _activeTask!.clientId,
-        );
-        
-        print('Обновлен статус заказа: $newStatus, новый таймлайн: $updatedTimeline');
+        // Проверяем, что _activeTask не null перед использованием
+        if (_activeTask != null) {
+          _activeTask = EngineerTask(
+            id: _activeTask!.id,
+            address: _activeTask!.address,
+            status: newTaskStatus,
+            clientName: _activeTask!.clientName,
+            phone: _activeTask!.phone,
+            description: _activeTask!.description,
+            cost: _activeTask!.cost,
+            timeline: updatedTimeline,
+            currentAction: nextAction,
+            clientId: _activeTask!.clientId,
+          );
+          
+          print('Обновлен статус заказа: $newStatus, новый таймлайн: $updatedTimeline');
+        }
       });
       
       // Отправка уведомления клиенту, если у нас есть ID клиента
-      if (_activeTask!.clientId != null) {
+      if (_activeTask != null && _activeTask!.clientId != null) {
         await _sendNotificationToClient(newStatus, statusText);
       }
       
@@ -3823,18 +4421,223 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
     if (_activeTask == null || _activeTask!.clientId == null) return;
     
     try {
+      final clientId = _activeTask!.clientId;
+      final orderId = _activeTask!.id;
+      
+      // Проверяем, что у нас есть необходимые данные
+      if (clientId == null || orderId.isEmpty) {
+        print('Не удалось отправить уведомление: отсутствует ID клиента или заказа');
+        return;
+      }
+      
       // Создаем уведомление для клиента
       await FirebaseFirestore.instance.collection('notifications').add({
-        'userId': _activeTask!.clientId,
+        'userId': clientId,
         'type': 'order_status_updated',
         'title': 'Статус заказа изменен',
-        'message': 'Статус вашего заказа №${_activeTask!.id} изменен на "$statusText"',
-        'orderId': _activeTask!.id,
+        'message': 'Статус вашего заказа №$orderId изменен на "$statusText"',
+        'orderId': orderId,
         'createdAt': FieldValue.serverTimestamp(),
         'read': false
       });
     } catch (e) {
       print('Ошибка при отправке уведомления клиенту: $e');
+    }
+  }
+
+  // Метод для показа модального окна с оценкой клиента
+  Future<void> _showClientRatingDialog(String clientId, String clientName, String orderId) async {
+    // Если ID клиента не указан, не показываем диалог
+    if (clientId.isEmpty) {
+      print('ID клиента отсутствует, диалог оценки не будет показан');
+      return;
+    }
+    
+    double rating = 5.0; // По умолчанию 5 звезд
+    String review = ''; // Текст отзыва
+    
+    await showDialog(
+      context: context,
+      barrierDismissible: false, // Нельзя закрыть по тапу вне диалога
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Оценка клиента'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Оцените клиента $clientName'),
+                    const SizedBox(height: 20),
+                    // Звездный рейтинг
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(5, (index) {
+                        return IconButton(
+                          icon: Icon(
+                            index < rating ? Icons.star : Icons.star_border,
+                            color: const Color(0xFFD04E4E),
+                            size: 36,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              rating = index + 1.0;
+                            });
+                          },
+                        );
+                      }),
+                    ),
+                    // Текст с указанием оценки
+                    Text(
+                      'Оценка: ${rating.toStringAsFixed(1)}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    // Поле для ввода отзыва
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Напишите отзыв о клиенте (необязательно)',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      ),
+                      maxLines: 3,
+                      onChanged: (value) {
+                        review = value;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop(); // Закрыть без сохранения
+                  },
+                  child: const Text('Пропустить'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFD04E4E),
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    // Сохраняем отзыв и закрываем диалог
+                    _saveClientRating(clientId, orderId, rating, review);
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('Сохранить'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+  
+  // Метод для сохранения оценки клиента в Firestore
+  Future<void> _saveClientRating(String clientId, String orderId, double rating, String review) async {
+    // Если ID клиента или заказа пустой, не сохраняем оценку
+    if (clientId.isEmpty || orderId.isEmpty) {
+      print('Ошибка: ID клиента или заказа пустой, оценка не будет сохранена');
+      return;
+    }
+    
+    try {
+      // Получаем текущего пользователя
+      final user = AuthService().currentUser;
+      if (user == null) {
+        print('Ошибка: пользователь не авторизован при попытке оценить клиента');
+        return;
+      }
+      
+      final String engineerId = user.uid;
+      final String engineerName = user.displayName ?? 'Инженер';
+      
+      print('Сохранение оценки клиента: ID=$clientId, оценка=$rating, отзыв: "$review"');
+      
+      // Создаем документ отзыва
+      await FirebaseFirestore.instance.collection('client_reviews').add({
+        'clientId': clientId,
+        'orderId': orderId,
+        'engineerId': engineerId,
+        'engineerName': engineerName,
+        'rating': rating,
+        'review': review,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      
+      // Обновляем средний рейтинг клиента
+      await _updateClientAverageRating(clientId);
+      
+      if (mounted) {  // Проверяем, что виджет все еще в дереве
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Отзыв успешно сохранен'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Ошибка при сохранении оценки клиента: $e');
+      if (mounted) {  // Проверяем, что виджет все еще в дереве
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ошибка при сохранении отзыва: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+  
+  // Метод для обновления среднего рейтинга клиента
+  Future<void> _updateClientAverageRating(String clientId) async {
+    try {
+      // Получаем все отзывы клиента
+      final reviewsSnapshot = await FirebaseFirestore.instance
+          .collection('client_reviews')
+          .where('clientId', isEqualTo: clientId)
+          .get();
+      
+      // Если отзывов нет, выходим
+      if (reviewsSnapshot.docs.isEmpty) {
+        print('Отзывов для клиента с ID=$clientId не найдено');
+        return;
+      }
+      
+      // Вычисляем средний рейтинг
+      double totalRating = 0;
+      int reviewCount = 0;
+      
+      for (var doc in reviewsSnapshot.docs) {
+        final data = doc.data();
+        if (data['rating'] is num) {
+          totalRating += (data['rating'] as num).toDouble();
+          reviewCount++;
+        }
+      }
+      
+      double averageRating = reviewCount > 0 ? totalRating / reviewCount : 0;
+      
+      print('Обновление среднего рейтинга клиента: ID=$clientId, средний рейтинг=$averageRating из $reviewCount отзывов');
+      
+      // Обновляем данные пользователя
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(clientId)
+          .update({
+            'rating': averageRating,
+            'reviewCount': reviewCount,
+          });
+    } catch (e) {
+      print('Ошибка при обновлении среднего рейтинга клиента: $e');
     }
   }
 
@@ -4140,9 +4943,56 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
             // Загружаем дату создания профиля
             final createdAt = userData['createdAt'];
             
-            // Загружаем данные активности и рейтинга
-            final activity = userData['activity'];
+            // Загружаем данные рейтинга
             final rating = userData['rating'];
+            
+            // Получаем общее количество заказов инженера (активность)
+            int totalOrders = 0;
+            
+            try {
+              // 1. Считаем активные заказы в коллекции orders - строго по UID инженера
+              final activeOrdersQuery = await FirebaseFirestore.instance
+                  .collection('orders')
+                  .where('assignedTo', isEqualTo: user.uid)
+                  .get();
+              
+              int activeOrdersCount = activeOrdersQuery.docs.length;
+              print('Найдено активных заказов для инженера с ID=${user.uid}: $activeOrdersCount');
+              totalOrders += activeOrdersCount;
+              
+              // 2. Считаем выполненные/отмененные заказы в коллекции orders
+              final completedOrdersQuery = await FirebaseFirestore.instance
+                  .collection('orders')
+                  .where('assignedTo', isEqualTo: user.uid)
+                  .where('status', whereIn: ['выполнен', 'отменен'])
+                  .get();
+              
+              int completedOrdersCount = completedOrdersQuery.docs.length;
+              print('Найдено выполненных/отмененных заказов в коллекции orders: $completedOrdersCount');
+              // Не добавляем к totalOrders, т.к. эти заказы уже учтены в activeOrdersQuery
+              
+              // 3. Считаем заказы в истории - строго по UID инженера
+              final historyOrdersQuery = await FirebaseFirestore.instance
+                  .collection('order_history')
+                  .where('assignedTo', isEqualTo: user.uid)
+                  .get();
+              
+              int historyOrdersCount = historyOrdersQuery.docs.length;
+              print('Найдено заказов в истории для инженера с ID=${user.uid}: $historyOrdersCount');
+              totalOrders += historyOrdersCount;
+              
+              print('Общее количество заказов инженера: $totalOrders');
+              
+              // Обновляем данные активности в Firestore
+              await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(user.uid)
+                  .update({
+                    'activity': totalOrders
+                  });
+            } catch (e) {
+              print('Ошибка при получении заказов инженера: $e');
+            }
             
             if (mounted) {
               setState(() {
@@ -4167,7 +5017,7 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
                 }
                 
                 // Устанавливаем значения активности и рейтинга
-                _activity = activity is int ? activity : 0;
+                _activity = totalOrders;
                 _rating = rating is num ? rating.toDouble() : 0.0;
               });
             }

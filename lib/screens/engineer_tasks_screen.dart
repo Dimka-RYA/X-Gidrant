@@ -344,35 +344,53 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
             .collection('orders')
             .doc(task.id)
             .get();
-
+        
+        // Проверяем, что документ существует
         if (orderDoc.exists) {
-          // Копируем все поля из документа заказа и добавляем явно поля кодов подтверждения
           final orderData = orderDoc.data()!;
-          await FirebaseFirestore.instance
-              .collection('order_history')
-              .add({
+          
+          // Получаем текущего пользователя для гарантии сохранения его идентификатора
+          final user = AuthService().currentUser;
+          final userId = user?.uid ?? '';
+          final userName = user?.displayName ?? '';
+          
+          // Создаем запись в истории с явно указанными полями инженера
+          await FirebaseFirestore.instance.collection('order_history').add({
             ...orderData,
+            'completedAt': FieldValue.serverTimestamp(),
             'originalOrderId': task.id,
-            'arrivalCode': orderData['arrivalCode'] ?? 'Не указан', // Явно копируем код прибытия
-            'completionCode': orderData['completionCode'] ?? 'Не указан', // Явно копируем код завершения
+            'arrivalCode': orderData['arrivalCode'] ?? 'Не указан',
+            'completionCode': orderData['completionCode'] ?? 'Не указан',
+            // Гарантированно сохраняем информацию об инженере
+            'assignedTo': userId.isNotEmpty ? userId : (orderData['assignedTo'] ?? ''),
+            'assignedToName': userName.isNotEmpty ? userName : (orderData['assignedToName'] ?? ''),
           });
-
+          
+          // Выводим отладочную информацию
+          print('Заказ ${task.id} перемещен в историю с assignedTo: $userId, assignedToName: $userName');
+          
           // Удаляем заказ из основной коллекции
           await FirebaseFirestore.instance
               .collection('orders')
               .doc(task.id)
               .delete();
+              
+          // Показываем сообщение об успешном завершении
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Заказ успешно завершен и перемещен в историю'),
+              duration: Duration(seconds: 2),
+              backgroundColor: Colors.green,
+            ),
+          );
         }
       } catch (e) {
-        print('Ошибка при завершении заказа: $e');
-        
-        // Проверяем, что виджет все еще в дереве
-        if (!mounted) return;
-        
+        print('Ошибка при завершении задания: $e');
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Ошибка при завершении заказа'),
+          SnackBar(
+            content: Text('Ошибка при завершении задания: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
           ),
         );
       }

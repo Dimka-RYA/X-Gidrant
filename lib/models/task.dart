@@ -47,31 +47,47 @@ class Task {
     this.paidAt,
   });
 
-  factory Task.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return Task(
-      id: doc.id,
-      title: data['title'] ?? '',
-      description: data['description'] ?? '',
-      address: data['address'] ?? '',
-      status: data['status'] ?? '',
-      assignedTo: data['assignedTo'] ?? '',
-      assignedToName: data['assignedToName'] ?? '',
-      coordinates: data['coordinates'] as GeoPoint?,
-      arrivalCode: data['arrivalCode'] ?? '',
-      completionCode: data['completionCode'] ?? '',
-      price: (data['price'] ?? 0).toDouble(),
-      currency: data['currency'] ?? '₽',
-      paymentMethod: data['paymentMethod'] ?? '',
-      paymentStatus: data['paymentStatus'] ?? '',
-      userId: data['userId'] ?? '',
-      userName: data['userName'] ?? '',
-      userEmail: data['userEmail'] ?? '',
-      userPhone: data['userPhone'] ?? '',
-      additionalInfo: data['additionalInfo'] ?? '',
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      paidAt: (data['paidAt'] as Timestamp?)?.toDate(),
-    );
+  factory Task.fromFirestore(dynamic doc) {
+    try {
+      final data = doc.data() as Map<String, dynamic>;
+      
+      print('===== ПРОВЕРКА КОНВЕРТАЦИИ TASK =====');
+      print('Документ ID: ${doc.id}');
+      print('- assignedTo: "${data['assignedTo']}"');
+      print('- assignedToName: "${data['assignedToName']}"');
+      print('- status: "${data['status']}"');
+      print('- Все поля:');
+      data.forEach((key, value) {
+        print('  - $key: $value');
+      });
+      
+      return Task(
+        id: doc.id,
+        title: data['title'] ?? '',
+        description: data['description'] ?? '',
+        address: data['address'] ?? '',
+        status: data['status'] ?? '',
+        assignedTo: data['assignedTo'] ?? '',
+        assignedToName: data['assignedToName'] ?? '',
+        coordinates: data['coordinates'] as GeoPoint?,
+        arrivalCode: data['arrivalCode'] ?? '',
+        completionCode: data['completionCode'] ?? '',
+        price: (data['price'] ?? 0).toDouble(),
+        currency: data['currency'] ?? '₽',
+        paymentMethod: data['paymentMethod'] ?? '',
+        paymentStatus: data['paymentStatus'] ?? '',
+        userId: data['userId'] ?? '',
+        userName: data['userName'] ?? '',
+        userEmail: data['userEmail'] ?? '',
+        userPhone: data['userPhone'] ?? '',
+        additionalInfo: data['additionalInfo'] ?? '',
+        createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        paidAt: (data['paidAt'] as Timestamp?)?.toDate(),
+      );
+    } catch (e) {
+      print('Ошибка при парсинге Task из Firestore: $e');
+      throw e;
+    }
   }
 
   Map<String, dynamic> toMap() {

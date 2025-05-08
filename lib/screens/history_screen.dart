@@ -21,7 +21,7 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
       date: '07.05.2024',
       time: '12:00 04.05.2024',
       cost: 312.50,
-      currency: '\$',
+      currency: '₽',
     ),
     OrderData(
       id: '777',
@@ -31,7 +31,7 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
       date: '05.05.2024',
       time: '12:00 30.04.2024',
       cost: 312.50,
-      currency: '\$',
+      currency: '₽',
     ),
     OrderData(
       id: '777',
@@ -41,7 +41,7 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
       date: '30.04.2024',
       time: '12:00 26.04.2024',
       cost: 312.50,
-      currency: '\$',
+      currency: '₽',
     ),
   ];
 
@@ -315,7 +315,7 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
       date: formattedDate,
       time: formattedTime,
       cost: (data['price'] is num) ? (data['price'] as num).toDouble() : 0.0,
-      currency: data['currency'] ?? '\$',
+      currency: data['currency'] ?? '₽',
       additionalInfo: additionalData,
       statusEvents: statusEvents,
       originalStatus: data['status'],
@@ -875,12 +875,12 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
           borderRadius: BorderRadius.circular(12),
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
                 // Верхняя строка: ID заказа и дата
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       'Заказ #${order.id}',
@@ -915,7 +915,7 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
                 
                 // Адрес
                 Row(
-                  children: [
+                        children: [
                     const Icon(
                       Icons.location_on_outlined,
                       size: 16,
@@ -923,9 +923,9 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
                     ),
                     const SizedBox(width: 4),
                     Expanded(
-                      child: Text(
+                            child: Text(
                         order.address,
-                        style: const TextStyle(
+                              style: const TextStyle(
                           fontSize: 14,
                           color: Colors.grey,
                         ),
@@ -940,14 +940,14 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
                 // Нижняя строка: Стоимость и статус
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
+                              children: [
+                                Text(
                       '${order.cost.toStringAsFixed(2)} ${order.currency}',
-                      style: const TextStyle(
+                                  style: const TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
@@ -956,20 +956,20 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
                       ),
                       child: Text(
                         statusText,
-                        style: TextStyle(
-                          fontSize: 12,
+                                    style: TextStyle(
+                                      fontSize: 12,
                           fontWeight: FontWeight.bold,
                           color: statusColor,
                         ),
-                      ),
-                    ),
-                  ],
-                ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                 
                 // Дополнительная информация (при наличии)
                 if (additionalInfoText.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  Text(
+                            Text(
                     'Доп. информация: $additionalInfoText',
                     style: TextStyle(
                       fontSize: 12,
@@ -1224,7 +1224,7 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
       children: [
         Text(
             'Информация о заказе',
-            style: TextStyle(
+          style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
               color: Colors.grey[800],
@@ -1244,7 +1244,7 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
             const Divider(),
             const SizedBox(height: 16),
             
-            Text(
+        Text(
               'Коды подтверждения',
               style: TextStyle(
                 fontSize: 16,
@@ -1298,7 +1298,7 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
         border: Border.all(color: color.withOpacity(0.3), width: 1),
       ),
       child: Row(
-        children: [
+      children: [
           Icon(icon, color: color, size: 24),
           const SizedBox(width: 12),
           Expanded(
@@ -1313,7 +1313,7 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
+        Text(
                   code,
                   style: TextStyle(
                     color: Colors.black,
@@ -1365,24 +1365,24 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
           SizedBox(
             width: 120,
             child: Text(
-              label,
-              style: TextStyle(
+          label,
+          style: TextStyle(
                 fontSize: 14,
-                color: Colors.grey[600],
-              ),
-            ),
+            color: Colors.grey[600],
           ),
-          Expanded(
-            child: Text(
+        ),
+          ),
+        Expanded(
+          child: Text(
               displayValue,
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
                 color: valueColor,
               ),
-            ),
           ),
-        ],
+        ),
+      ],
       ),
     );
   }

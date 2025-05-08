@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../auth/auth_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class OrderHistoryScreen extends StatefulWidget {
   const OrderHistoryScreen({super.key});
@@ -20,39 +21,83 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   }
 
   Future<void> _loadOrderHistory() async {
-    setState(() {
-      _isLoading = true;
-    });
-
     try {
-      final user = AuthService().currentUser;
+      setState(() {
+        _isLoading = true;
+      });
+
+      // Получаем текущего пользователя
+      final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         setState(() {
           _isLoading = false;
+          _orderHistory = [];
         });
         return;
       }
 
-      final querySnapshot = await FirebaseFirestore.instance
+      print('===== ЗАГРУЗКА ИСТОРИИ ЗАКАЗОВ КЛИЕНТА =====');
+      print('Текущий пользователь: ID=${user.uid}, DisplayName=${user.displayName}');
+
+      // Изменяем запрос для обхода необходимости составных индексов
+      // Запрашиваем все недавние заказы и фильтруем на стороне клиента
+      final QuerySnapshot snapshot = await FirebaseFirestore.instance
           .collection('order_history')
-          .where('userId', isEqualTo: user.uid)
           .orderBy('completedAt', descending: true)
+          .limit(100) // Ограничиваем количество для производительности
           .get();
 
+      print('Получено документов истории: ${snapshot.docs.length}');
+
+      // Вывод информации о первых нескольких документах для отладки
+      print('Первые 5 документов истории (или меньше):');
+      final previewDocs = snapshot.docs.take(5).toList();
+      for (int i = 0; i < previewDocs.length; i++) {
+        final doc = previewDocs[i];
+        final data = doc.data() as Map<String, dynamic>;
+        print('${i+1}. ID: ${doc.id}');
+        print('   - userId: ${data['userId']}');
+        print('   - userName: ${data['userName']}');
+        print('   - assignedTo: ${data['assignedTo']}');
+        print('   - Дата: ${data['completedAt'] != null ? (data['completedAt'] as Timestamp).toDate() : "не указана"}');
+      }
+
+      // Фильтруем результаты на стороне клиента
+      final filteredDocs = snapshot.docs.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        final String docUserId = data['userId']?.toString() ?? '';
+        
+        // Проверяем совпадение пользователя
+        final bool matchesUserId = docUserId.trim() == user.uid.trim();
+        
+        if (matchesUserId) {
+          print('Документ ${doc.id} соответствует текущему пользователю (userId: $docUserId)');
+        }
+        
+        return matchesUserId;
+      }).toList();
+
+      print('Всего документов истории: ${snapshot.docs.length}, отфильтровано: ${filteredDocs.length}');
+
+      // Преобразуем документы в объекты заказов
+      final List<Map<String, dynamic>> orders = filteredDocs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return {
+          'id': doc.id,
+          ...data,
+        };
+      }).toList();
+
+      // Обновляем состояние
       setState(() {
-        _orderHistory = querySnapshot.docs.map((doc) {
-          final data = doc.data();
-          return {
-            'id': doc.id,
-            ...data,
-          };
-        }).toList();
+        _orderHistory = orders;
         _isLoading = false;
       });
     } catch (e) {
       print('Ошибка при загрузке истории заказов: $e');
       setState(() {
         _isLoading = false;
+        _orderHistory = [];
       });
     }
   }
@@ -63,12 +108,20 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       backgroundColor: const Color(0xFF1E1E1E),
       appBar: AppBar(
         title: const Text(
-          'История заказов',
+          'Выполненные заказы',
           style: TextStyle(color: Colors.white),
         ),
         backgroundColor: const Color(0xFF2D2D2D),
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          // Добавляем кнопку для ручного обновления
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadOrderHistory,
+            tooltip: 'Обновить историю',
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(
@@ -105,7 +158,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'История заказов пуста',
+            'История выполненных заказов пуста',
             style: TextStyle(
               color: Colors.grey[400],
               fontSize: 18,
@@ -114,7 +167,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Здесь будут отображаться ваши выполненные заказы',
+            'Здесь будут отображаться заказы, которые вы выполнили',
             style: TextStyle(
               color: Colors.grey[600],
               fontSize: 14,
@@ -133,6 +186,9 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     print('Данные заказа: ${order.toString()}');
     print('Код прибытия: ${order['arrivalCode']}');
     print('Код завершения: ${order['completionCode']}');
+    
+    // Получаем имя клиента
+    String clientName = order['userName'] ?? order['clientName'] ?? 'Нет данных';
     
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -217,6 +273,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildDetailRow('Услуга', order['title'] ?? 'Не указано'),
+                _buildDetailRow('Клиент', clientName),
                 _buildDetailRow('Адрес', order['address'] ?? 'Не указано'),
                 _buildDetailRow('Стоимость', '${order['price'] ?? '0'} ${order['currency'] ?? '₽'}'),
                 

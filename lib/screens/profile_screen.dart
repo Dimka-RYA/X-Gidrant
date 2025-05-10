@@ -294,7 +294,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // Метод для загрузки отзывов пользователя из Firestore
+  // Метод для загрузки отзывов пользователя
   Future<void> _loadUserReviews() async {
     if (!mounted) return;
     setState(() {
@@ -303,37 +303,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
     
     try {
       final user = _authService.currentUser;
-      
       if (user != null) {
-        // Получаем отзывы из коллекции reviews, где userId соответствует ID текущего пользователя
         final reviewsSnapshot = await FirebaseFirestore.instance
             .collection('reviews')
-            .where('userId', isEqualTo: user.uid)
-            .orderBy('createdAt', descending: true) // Сортируем от новых к старым
+            .where('clientId', isEqualTo: user.uid)
+            .where('type', isEqualTo: 'engineer_to_client')
+            .orderBy('createdAt', descending: true)
             .get();
             
-        if (!mounted) return;
-        
-        // Преобразуем документы в список Map
         final reviews = reviewsSnapshot.docs.map((doc) {
           final data = doc.data();
           return {
             'id': doc.id,
-            'authorName': data['authorName'] ?? 'Неизвестный пользователь',
-            'authorId': data['authorId'] ?? '',
-            'authorImageUrl': data['authorImageUrl'],
-            'rating': data['rating'] ?? 5,
-            'text': data['text'] ?? 'Нет текста отзыва',
-            'createdAt': data['createdAt'] ?? Timestamp.now(),
+            'engineerName': data['engineerName'] ?? 'Неизвестный инженер',
+            'rating': data['rating'] ?? 0,
+            'comment': data['comment'] ?? '',
+            'createdAt': data['createdAt']?.toDate() ?? DateTime.now(),
           };
         }).toList();
         
+        if (!mounted) return;
         setState(() {
           _reviews = reviews;
           _isLoadingReviews = false;
         });
-        
-        print('Загружено ${_reviews.length} отзывов');
       }
     } catch (e) {
       print('Ошибка при загрузке отзывов: $e');
@@ -341,7 +334,150 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() {
         _isLoadingReviews = false;
       });
+      _showTopNotification('Ошибка при загрузке отзывов', color: Colors.red);
     }
+  }
+
+  // Виджет для отображения отзывов
+  Widget _buildReviewsSection() {
+    if (_isLoadingReviews) {
+      return const Center(
+        child: CircularProgressIndicator(
+          color: Color(0xFFD04E4E),
+        ),
+      );
+    }
+
+    if (_reviews.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey[300]!),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              Icons.star_border_rounded,
+              size: 48,
+              color: Colors.grey[400],
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'У вас пока нет отзывов',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          childAspectRatio: 0.8,
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
+        ),
+        itemCount: _reviews.length,
+        itemBuilder: (context, index) {
+          final review = _reviews[index];
+          return Card(
+            elevation: 3,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            color: const Color(0xFF2A2A2A),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const CircleAvatar(
+                        backgroundColor: Color(0xFFD04E4E),
+                        radius: 16,
+                        child: Icon(
+                          Icons.engineering,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          review['engineerName'],
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          maxLines: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Text(
+                        '${review['rating']}',
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(
+                        Icons.star,
+                        color: Colors.amber,
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Text(
+                        review['comment'].isNotEmpty 
+                            ? review['comment'] 
+                            : 'Без комментария',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[300],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${review['createdAt'].day}.${review['createdAt'].month}.${review['createdAt'].year}',
+                    style: TextStyle(
+                      color: Colors.grey[500],
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -607,35 +743,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                     ),
                     
-                    const SizedBox(height: 32),
-                    
-                    // Раздел отзывов
-                    const Align(
-                      alignment: Alignment.centerLeft,
+                    const SizedBox(height: 24),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
                       child: Text(
-                        'Отзывы',
+                        'Отзывы инженеров',
                         style: TextStyle(
-                          fontSize: 22,
+                          fontSize: 20,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
-                    
-                    const SizedBox(height: 16),
-                    
-                    // Отображение отзывов или сообщения об их отсутствии
-                    _isLoadingReviews
-                    ? const Center(
-                        child: CircularProgressIndicator(color: Color(0xFFD04E4E)),
-                      )
-                    : _reviews.isEmpty
-                      ? _buildEmptyReviewsMessage()
-                      : Column(
-                          children: _reviews.map((review) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _buildReviewCard(review),
-                          )).toList(),
-                        ),
+                    const SizedBox(height: 8),
+                    _buildReviewsSection(),
                     
                     const SizedBox(height: 20),
                     
@@ -739,139 +859,5 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
     );
-  }
-  
-  // Виджет для отображения сообщения об отсутствии отзывов
-  Widget _buildEmptyReviewsMessage() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.grey[200],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.rate_review_outlined,
-            size: 64,
-            color: Colors.grey[400],
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'У вас пока нет отзывов',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF666666),
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Отзывы появятся после заказов',
-            style: TextStyle(
-              fontSize: 14,
-              color: Color(0xFF999999),
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-  
-  // Обновленный метод для отображения карточки отзыва
-  Widget _buildReviewCard(Map<String, dynamic> review) {
-    // Получаем рейтинг
-    final int rating = review['rating'] as int;
-    
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              // Аватар автора отзыва
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.grey,
-                  shape: BoxShape.circle,
-                  image: review['authorImageUrl'] != null
-                    ? DecorationImage(
-                        image: NetworkImage(review['authorImageUrl']),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
-                ),
-                child: review['authorImageUrl'] == null
-                  ? const Icon(
-                      Icons.person,
-                      color: Colors.white,
-                      size: 24,
-                    )
-                  : null,
-              ),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Имя автора отзыва
-                  Text(
-                    review['authorName'] as String,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  // Звездный рейтинг
-                  Row(
-                    children: List.generate(5, (index) {
-                      return Icon(
-                        index < rating ? Icons.star : Icons.star_border,
-                        color: Colors.yellow,
-                        size: 14,
-                      );
-                    }),
-                  ),
-                ],
-              ),
-              const Spacer(),
-              // Дата отзыва
-              if (review['createdAt'] != null)
-                Text(
-                  _formatDate(review['createdAt'] as Timestamp),
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 12,
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Текст отзыва
-          Text(
-            review['text'] as String,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  // Метод для форматирования даты
-  String _formatDate(Timestamp timestamp) {
-    final DateTime date = timestamp.toDate();
-    return '${date.day}.${date.month}.${date.year}';
   }
 } 

@@ -13,11 +13,13 @@ class OrderHistoryScreen extends StatefulWidget {
 class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
   bool _isLoading = false;
   List<Map<String, dynamic>> _orderHistory = [];
+  Map<String, bool> _reviewedOrders = {};
 
   @override
   void initState() {
     super.initState();
     _loadOrderHistory();
+    _loadReviewedOrders();
   }
 
   Future<void> _loadOrderHistory() async {
@@ -99,6 +101,44 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
         _isLoading = false;
         _orderHistory = [];
       });
+    }
+  }
+
+  Future<void> _loadReviewedOrders() async {
+    try {
+      // Получаем текущего пользователя
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      print('Загрузка информации о заказах с отзывами...');
+      
+      // Получаем все отзывы текущего пользователя
+      final reviewsSnapshot = await FirebaseFirestore.instance
+          .collection('reviews')
+          .where('clientId', isEqualTo: user.uid)
+          .where('type', isEqualTo: 'client_to_engineer')
+          .get();
+          
+      // Создаем Map для быстрого поиска
+      final Map<String, bool> reviewedMap = {};
+      
+      for (var doc in reviewsSnapshot.docs) {
+        final data = doc.data();
+        final String orderId = data['orderId'] ?? '';
+        if (orderId.isNotEmpty) {
+          reviewedMap[orderId] = true;
+        }
+      }
+      
+      print('Загружено ${reviewedMap.length} заказов с отзывами');
+      
+      if (mounted) {
+        setState(() {
+          _reviewedOrders = reviewedMap;
+        });
+      }
+    } catch (e) {
+      print('Ошибка при загрузке информации о заказах с отзывами: $e');
     }
   }
 
@@ -189,6 +229,13 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
     
     // Получаем имя клиента
     String clientName = order['userName'] ?? order['clientName'] ?? 'Нет данных';
+    // Получаем ID и имя инженера
+    String engineerId = order['assignedTo'] ?? '';
+    String engineerName = order['assignedToName'] ?? 'Неизвестный инженер';
+    // ID заказа
+    String orderId = order['id'] ?? '';
+    // Проверяем, был ли оставлен отзыв
+    bool hasReview = _reviewedOrders[orderId] ?? false;
     
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -274,6 +321,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
               children: [
                 _buildDetailRow('Услуга', order['title'] ?? 'Не указано'),
                 _buildDetailRow('Клиент', clientName),
+                _buildDetailRow('Инженер', engineerName),
                 _buildDetailRow('Адрес', order['address'] ?? 'Не указано'),
                 _buildDetailRow('Стоимость', '${order['price'] ?? '0'} ${order['currency'] ?? '₽'}'),
                 
@@ -330,6 +378,68 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
                     style: TextStyle(
                       color: Colors.grey[300],
                       fontSize: 14,
+                    ),
+                  ),
+                ],
+
+                // Добавляем кнопку для оценки инженера, если отзыв еще не оставлен
+                if (!hasReview && engineerId.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Divider(color: Color(0xFF3D3D3D)),
+                  const SizedBox(height: 16),
+                  
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _showRatingDialog(order),
+                      icon: const Icon(Icons.star, color: Colors.amber),
+                      label: const Text('Оценить инженера'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFD04E4E),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                
+                // Показываем информацию о том, что отзыв оставлен
+                if (hasReview) ...[
+                  const SizedBox(height: 16),
+                  const Divider(color: Color(0xFF3D3D3D)),
+                  const SizedBox(height: 8),
+                  
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Colors.amber.withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.check_circle,
+                          color: Colors.amber,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Вы уже оставили отзыв об этом инженере',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -436,6 +546,282 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}';
     } catch (e) {
       return 'Ошибка даты';
+    }
+  }
+
+  // Метод для показа диалога оценки инженера
+  void _showRatingDialog(Map<String, dynamic> order) {
+    // Получаем ID и имя инженера
+    String engineerId = order['assignedTo'] ?? '';
+    String engineerName = order['assignedToName'] ?? 'Неизвестный инженер';
+    String orderId = order['id'] ?? '';
+    String historyId = order['originalOrderId'] ?? orderId;
+    
+    // Если нет ID инженера, не показываем диалог
+    if (engineerId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Ошибка: не найден ID инженера'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
+    // Значения для отзыва
+    double rating = 5.0;
+    String comment = '';
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF2D2D2D),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            'Оценить инженера',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Как вы оцениваете работу инженера $engineerName?',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '${rating.toInt()}', 
+                      style: const TextStyle(
+                        fontSize: 24, 
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.star, color: Colors.amber, size: 30),
+                  ],
+                ),
+                Slider(
+                  value: rating,
+                  min: 1.0,
+                  max: 5.0,
+                  divisions: 4,
+                  label: rating.toInt().toString(),
+                  activeColor: const Color(0xFFD04E4E),
+                  inactiveColor: Colors.grey,
+                  onChanged: (value) {
+                    setState(() {
+                      rating = value;
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Оставьте комментарий (опционально)',
+                    hintStyle: TextStyle(color: Colors.grey[400]),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFF3D3D3D)),
+                    ),
+                    filled: true,
+                    fillColor: const Color(0xFF1E1E1E),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFF3D3D3D)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFD04E4E)),
+                    ),
+                  ),
+                  style: const TextStyle(color: Colors.white),
+                  maxLines: 3,
+                  onChanged: (value) {
+                    comment = value;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text(
+                'Отмена',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _saveEngineerReview(
+                  orderId, 
+                  historyId,
+                  engineerId, 
+                  engineerName, 
+                  rating.toInt(), 
+                  comment
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFD04E4E),
+              ),
+              child: const Text(
+                'Отправить', 
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  // Метод для сохранения отзыва о инженере
+  Future<void> _saveEngineerReview(
+    String orderId,
+    String historyId,
+    String engineerId,
+    String engineerName,
+    int rating,
+    String comment
+  ) async {
+    try {
+      // Показываем индикатор загрузки
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Сохранение отзыва...'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      
+      // Получаем текущего пользователя
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('Пользователь не авторизован');
+      
+      // Получаем данные пользователя
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      String userName = '';
+      if (userDoc.exists) {
+        final userData = userDoc.data();
+        if (userData != null) {
+          userName = userData['name'] ?? '';
+        }
+      }
+      
+      // Создаем отзыв в коллекции reviews
+      final reviewData = {
+        'orderId': orderId,
+        'historyId': historyId,
+        'engineerId': engineerId,
+        'engineerName': engineerName,
+        'clientId': user.uid,
+        'clientName': userName,
+        'rating': rating,
+        'comment': comment,
+        'type': 'client_to_engineer', // Тип отзыва: от клиента инженеру
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+      
+      // Сохраняем отзыв
+      await FirebaseFirestore.instance.collection('reviews').add(reviewData);
+      
+      // Обновляем средний рейтинг инженера
+      await _updateEngineerAverageRating(engineerId);
+      
+      // Обновляем состояние, чтобы показать, что отзыв оставлен
+      if (mounted) {
+        setState(() {
+          _reviewedOrders[orderId] = true;
+        });
+      }
+      
+      // Показываем сообщение об успехе
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Спасибо за ваш отзыв!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Ошибка при сохранении отзыва: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ошибка: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+  
+  // Метод для обновления среднего рейтинга инженера
+  Future<void> _updateEngineerAverageRating(String engineerId) async {
+    try {
+      if (engineerId.isEmpty) {
+        print('Ошибка: ID инженера пустой, невозможно обновить рейтинг');
+        return;
+      }
+      
+      // Получаем все отзывы для данного инженера
+      final reviewsSnapshot = await FirebaseFirestore.instance
+          .collection('reviews')
+          .where('engineerId', isEqualTo: engineerId)
+          .where('type', isEqualTo: 'client_to_engineer')
+          .get();
+      
+      if (reviewsSnapshot.docs.isEmpty) {
+        print('Нет отзывов для инженера $engineerId');
+        return;
+      }
+      
+      // Вычисляем средний рейтинг
+      double totalRating = 0;
+      int count = 0;
+      
+      for (final doc in reviewsSnapshot.docs) {
+        final data = doc.data();
+        final rating = data['rating'] as int?;
+        if (rating != null) {
+          totalRating += rating;
+          count++;
+        }
+      }
+      
+      if (count > 0) {
+        final averageRating = totalRating / count;
+        
+        // Обновляем средний рейтинг инженера в его документе
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(engineerId)
+            .update({
+              'rating': averageRating,
+              'ratingCount': count,
+            });
+        
+        print('Средний рейтинг инженера обновлен: $averageRating ($count отзывов)');
+      }
+    } catch (e) {
+      print('Ошибка при обновлении среднего рейтинга инженера: $e');
     }
   }
 } 

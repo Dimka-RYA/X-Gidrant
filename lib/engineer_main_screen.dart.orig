@@ -15,9 +15,6 @@ import 'package:intl/date_symbol_data_local.dart';
 import '../models/task.dart';
 // Добавляем импорт Filter для составных запросов к Firestore
 import 'package:cloud_firestore/cloud_firestore.dart' show Filter;
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart' as geo;
 
 class EngineerMainScreen extends StatefulWidget {
   const EngineerMainScreen({super.key});
@@ -4124,58 +4121,24 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
 
   // Завершение работы (требуется подтверждение клиента)
   Future<void> _completeWork() async {
-    try {
-      if (_activeTask == null) {
-        print('_completeWork: _activeTask = null, выход из метода');
-        return;
-      }
-      
-      // Сохраняем ID заказа до вызова методов, которые могут изменить _activeTask
-      final String orderId = _activeTask!.id;
-      if (orderId.isEmpty) {
-        print('_completeWork: ID заказа пуст, выход из метода');
-        return;
-      }
-      
-      print('Запускаем процесс завершения работы для заказа: $orderId');
-      
-      final confirmed = await _showConfirmationCodeDialog('completion');
-      if (!confirmed) {
-        print('_completeWork: подтверждение не получено, выход из метода');
-        return;
-      }
-      
-      // Обновляем статус заказа
-      await _updateOrderStatus(
-        'выполнен',
-        'Завершил работу',
-        'Инженер завершил работу',
-      );
-      
-      print('Статус заказа $orderId изменен на "выполнен", перемещаем заказ в историю');
-      
-      // После успешного завершения работы, перемещаем заказ в историю
-      // Передаем сохраненный ID вместо обращения к _activeTask
-      await _moveOrderToHistory(orderId);
-    } catch (e) {
-      print('Ошибка в методе _completeWork: $e');
-      print(StackTrace.current);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка при завершении работы: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+    if (_activeTask == null) return;
+    
+    final confirmed = await _showConfirmationCodeDialog('completion');
+    if (!confirmed) return;
+    
+    await _updateOrderStatus(
+      'выполнен',
+      'Работа завершена',
+      'Инженер завершил работу',
+    );
+    
+    // После успешного завершения работы, перемещаем заказ в историю
+    await _moveOrderToHistory(_activeTask!.id);
   }
 
   // Метод для перемещения заказа в историю
   Future<void> _moveOrderToHistory(String orderId) async {
     try {
-      print('Запуск _moveOrderToHistory для заказа: $orderId');
-      
       // Получаем документ заказа
       final orderDoc = await FirebaseFirestore.instance
           .collection('orders')
@@ -4206,52 +4169,25 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
         userName = userData?['name'] ?? '';
       }
       
-      // Получаем данные заказа (безопасно - проверяем на null)
-      final orderData = orderDoc.data();
-      if (orderData == null) {
-        print('Ошибка: данные заказа $orderId пусты');
-        return;
-      }
+      // Получаем данные заказа
+      final orderData = orderDoc.data()!;
       
       print('===== ПЕРЕМЕЩЕНИЕ ЗАКАЗА В ИСТОРИЮ =====');
       print('Заказ ID: $orderId');
       print('Текущий пользователь: ID=${user.uid}, DisplayName=$userName');
       
-      // Получаем информацию о клиенте (безопасно)
-      final String clientId = orderData['userId'] as String? ?? '';
-      final String clientName = orderData['userName'] as String? ?? 
-                               orderData['clientName'] as String? ?? 'Клиент не указан';
-      
-      print('Клиент ID: $clientId, Имя: $clientName');
-      print('Проверка ID клиента перед созданием записи истории: "${clientId}" (пустой: ${clientId.isEmpty})');
-      
-      // Создаем данные для записи в историю
-      final Map<String, dynamic> historyData = {
+      // Создаем запись в истории с гарантированным сохранением информации о исполнителе
+      final historyRef = await FirebaseFirestore.instance.collection('order_history').add({
+        ...orderData,
         'completedAt': FieldValue.serverTimestamp(),
         'originalOrderId': orderId,
+        'arrivalCode': orderData['arrivalCode'] ?? 'Не указан',
+        'completionCode': orderData['completionCode'] ?? 'Не указан',
+        // Гарантированно устанавливаем UID и имя текущего инженера
         'assignedTo': user.uid,
         'assignedToName': userName,
         'status': 'выполнен',
-      };
-      
-      // Добавляем безопасно все остальные поля из оригинального заказа
-      orderData.forEach((key, value) {
-        if (value != null) {
-          historyData[key] = value;
-        }
       });
-      
-      // Добавляем дополнительные поля, если они существуют
-      historyData['arrivalCode'] = orderData['arrivalCode'] as String? ?? 'Не указан';
-      historyData['completionCode'] = orderData['completionCode'] as String? ?? 'Не указан';
-      
-      // Сохраняем userId явно для гарантии сохранения ID клиента
-      if (clientId.isNotEmpty) {
-        historyData['userId'] = clientId;
-      }
-      
-      // Создаем запись в истории
-      final historyRef = await FirebaseFirestore.instance.collection('order_history').add(historyData);
       
       print('Заказ успешно сохранен в историю с ID: ${historyRef.id}');
       
@@ -4262,313 +4198,28 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
           .delete();
       
       print('Заказ $orderId успешно удален из основной коллекции');
-      
-      // Показываем модальное окно для оценки клиента
-      // Проверяем наличие ID клиента
-      if (clientId.isNotEmpty) {
-        print('ID клиента не пустой, можно показать диалог оценки');
-        if (mounted) {
-          print('Компонент смонтирован, показываем диалог после задержки');
-          
-          // Используем более длинную задержку, чтобы дать больше времени на закрытие предыдущих диалогов
-          await Future.delayed(const Duration(seconds: 1));
-          
-          if (mounted) {
-            print('Вызываем _showClientRatingDialog для клиента: $clientName');
-            // Непосредственно показываем диалог, без использования Future.delayed
-            _showClientRatingDialog(orderId, clientId, clientName, historyRef.id);
-          } else {
-            print('Компонент размонтирован после задержки, диалог не будет показан');
-          }
-        } else {
-          print('Компонент не смонтирован, диалог не будет показан');
-        }
-      } else {
-        print('Отзыв не будет показан, так как ID клиента пустой');
-      }
     } catch (e) {
       print('Ошибка при перемещении заказа в историю: $e');
-      // Выводим стек ошибки для отладки
-      print(StackTrace.current);
-    }
-  }
-
-  // Метод для отображения модального окна оценки клиента
-  void _showClientRatingDialog(String orderId, String clientId, String clientName, String historyId) {
-    try {
-      // Проверяем, что все параметры не пустые
-      if (orderId.isEmpty || clientId.isEmpty || historyId.isEmpty) {
-        print('Ошибка: один из параметров пустой: orderId=$orderId, clientId=$clientId, historyId=$historyId');
-        return;
-      }
-      
-      print('Показываем диалог оценки для клиента: $clientName (ID: $clientId)');
-      print('Вызов showDialog для отображения окна с оценкой');
-      
-      // Оценка по умолчанию
-      double rating = 5.0;
-      // Текст комментария
-      String comment = '';
-      
-      if (!mounted) {
-        print('Компонент не монтирован, диалог не будет показан');
-        return;
-      }
-      
-      // Делаем принудительное обновление состояния, чтобы гарантировать корректный контекст
-      setState(() {});
-      
-      // Показываем диалог с небольшой задержкой для гарантии правильного контекста
-      Future.microtask(() {
-        if (mounted) {
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (context) => StatefulBuilder(
-              builder: (context, setState) => AlertDialog(
-                title: Text('Оценка клиента'),
-                content: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('Как вам работалось с клиентом $clientName?'),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text('${rating.toInt()}', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                          const SizedBox(width: 8),
-                          Icon(Icons.star, color: Colors.amber, size: 30),
-                        ],
-                      ),
-                      Slider(
-                        value: rating,
-                        min: 1.0,
-                        max: 5.0,
-                        divisions: 4,
-                        label: rating.toInt().toString(),
-                        onChanged: (value) {
-                          setState(() {
-                            rating = value;
-                          });
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        decoration: InputDecoration(
-                          hintText: 'Оставьте комментарий (опционально)',
-                          border: OutlineInputBorder(),
-                          filled: true,
-                          fillColor: Colors.grey[100],
-                        ),
-                        maxLines: 3,
-                        onChanged: (value) {
-                          comment = value;
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
-                    child: Text('Пропустить'),
-                  ),
-                  ElevatedButton(
-                    onPressed: () {
-                      _saveClientReview(orderId, clientId, clientName, rating.toInt(), comment, historyId);
-                      Navigator.of(context).pop();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFD04E4E),
-                    ),
-                    child: Text('Отправить', style: TextStyle(color: Colors.white)),
-                  ),
-                ],
-              ),
-            ),
-          ).catchError((error) {
-            print('Ошибка при отображении диалога: $error');
-            print(StackTrace.current);
-          });
-        } else {
-          print('Компонент размонтирован в Future.microtask, диалог не будет показан');
-        }
-      });
-    } catch (e) {
-      print('Ошибка при отображении диалога оценки клиента: $e');
-      print(StackTrace.current);
-    }
-  }
-  
-  // Метод для сохранения отзыва о клиенте в Firestore
-  Future<void> _saveClientReview(
-    String orderId, 
-    String clientId, 
-    String clientName, 
-    int rating, 
-    String comment,
-    String historyId
-  ) async {
-    try {
-      print('Сохраняем отзыв: orderId=$orderId, clientId=$clientId, rating=$rating');
-      
-      // Безопасно проверяем все значения
-      if (orderId.isEmpty || clientId.isEmpty || historyId.isEmpty) {
-        print('Ошибка: невозможно сохранить отзыв с пустыми значениями');
-        return;
-      }
-      
-      final user = AuthService().currentUser;
-      if (user == null) {
-        print('Ошибка: пользователь не авторизован при попытке сохранить отзыв');
-        return;
-      }
-      
-      // Получаем данные пользователя
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      
-      String userName = '';
-      if (userDoc.exists) {
-        final userData = userDoc.data() as Map<String, dynamic>?;
-        if (userData != null) {
-          userName = userData['name'] as String? ?? '';
-        }
-      }
-      
-      // Сохраняем отзыв в новой коллекции reviews
-      final reviewRef = await FirebaseFirestore.instance.collection('reviews').add({
-        'orderId': orderId,
-        'historyId': historyId,
-        'clientId': clientId,
-        'clientName': clientName,
-        'engineerId': user.uid,
-        'engineerName': userName,
-        'rating': rating,
-        'comment': comment,
-        'type': 'engineer_to_client', // Тип отзыва: от инженера клиенту
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-      
-      print('Отзыв о клиенте успешно сохранен с ID: ${reviewRef.id}');
-      
-      // Обновляем средний рейтинг клиента
-      await _updateClientAverageRating(clientId);
-      
-      // Показываем уведомление об успешной отправке отзыва
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ваш отзыв успешно отправлен!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      print('Ошибка при сохранении отзыва о клиенте: $e');
-      print(StackTrace.current);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка при отправке отзыва'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-  
-  // Метод для обновления среднего рейтинга клиента
-  Future<void> _updateClientAverageRating(String clientId) async {
-    try {
-      if (clientId.isEmpty) {
-        print('Ошибка: ID клиента пустой, невозможно обновить рейтинг');
-        return;
-      }
-      
-      print('Обновляем средний рейтинг для клиента: $clientId');
-      
-      // Получаем все отзывы для данного клиента
-      final reviewsSnapshot = await FirebaseFirestore.instance
-          .collection('reviews')
-          .where('clientId', isEqualTo: clientId)
-          .where('type', isEqualTo: 'engineer_to_client')
-          .get();
-      
-      if (reviewsSnapshot.docs.isEmpty) {
-        print('Нет отзывов для клиента $clientId');
-        return;
-      }
-      
-      // Вычисляем средний рейтинг
-      double totalRating = 0;
-      int count = 0;
-      
-      for (final doc in reviewsSnapshot.docs) {
-        final data = doc.data();
-        if (data == null) continue;
-        
-        final rating = data['rating'] as int?;
-        if (rating != null) {
-          totalRating += rating;
-          count++;
-        }
-      }
-      
-      if (count > 0) {
-        final averageRating = totalRating / count;
-        
-        // Обновляем средний рейтинг клиента в его документе
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(clientId)
-            .update({
-              'rating': averageRating,
-              'ratingCount': count,
-            });
-        
-        print('Средний рейтинг клиента обновлен: $averageRating ($count отзывов)');
-      }
-    } catch (e) {
-      print('Ошибка при обновлении среднего рейтинга клиента: $e');
-      print(StackTrace.current);
     }
   }
 
   // Новый метод для обновления статуса заказа
   Future<void> _updateOrderStatus(String newStatus, String statusText, String notes, {bool needConfirmation = false}) async {
     try {
-      // Сохраняем ссылку на текущую задачу локально
-      final EngineerTask? currentTask = _activeTask;
-      
-      if (currentTask == null) {
+      // Проверка на null перед использованием _activeTask
+      if (_activeTask == null) {
         print('_updateOrderStatus: _activeTask = null, выход из метода');
         return;
       }
       
-      // Сохраняем все необходимые данные в локальных переменных
-      final String orderId = currentTask.id;
-      final String address = currentTask.address ?? '';
-      final String clientName = currentTask.clientName ?? '';
-      final String phone = currentTask.phone ?? '';
-      final String description = currentTask.description ?? '';
-      final double cost = currentTask.cost ?? 0.0;
-      final String? clientId = currentTask.clientId;
-      final Map<String, String> existingTimeline = Map<String, String>.from(currentTask.timeline ?? {});
-      
-      if (orderId.isEmpty) {
-        print('_updateOrderStatus: orderId пустой, выход из метода');
+      String activeTaskId = _activeTask?.id ?? '';
+      if (activeTaskId.isEmpty) {
+        print('_updateOrderStatus: activeTaskId пустой, выход из метода');
         return;
       }
       
       // Дополнительная отладочная информация
-      print('Попытка обновления статуса: с ${currentTask.status} на $newStatus (statusText: $statusText)');
-      print('ID заказа: $orderId, клиент: $clientName, clientId: $clientId');
+      print('Попытка обновления статуса: с ${_activeTask?.status} на $newStatus (statusText: $statusText)');
       
       // Если требуется подтверждение клиента, показываем модальное окно
       if (needConfirmation) {
@@ -4577,7 +4228,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
       }
       
       // Получаем текущий документ заказа
-      final orderRef = FirebaseFirestore.instance.collection('orders').doc(orderId);
+      final orderRef = FirebaseFirestore.instance.collection('orders').doc(activeTaskId);
       final orderDoc = await orderRef.get();
       
       if (!orderDoc.exists) {
@@ -4585,7 +4236,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
         throw Exception('Заказ не найден');
       }
       
-      final data = orderDoc.data();
+      final data = orderDoc.data() as Map<String, dynamic>?;
       if (data == null) {
         print('_updateOrderStatus: Данные заказа = null');
         throw Exception('Данные заказа отсутствуют');
@@ -4595,7 +4246,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
       print('Данные заказа: ${data.toString()}');
       
       // Проверяем текущий статус заказа для корректного перехода между статусами
-      final currentStatus = data['status'] as String? ?? '';
+      final currentStatus = data['status'] ?? '';
       final bool isValidTransition = _isValidStatusTransition(currentStatus, newStatus);
       
       print('Текущий статус в БД: $currentStatus, переход возможен: $isValidTransition');
@@ -4613,10 +4264,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
       }
       
       // Получаем текущие события статуса
-      List<dynamic> currentEvents = [];
-      if (data['statusEvents'] != null) {
-        currentEvents = List<dynamic>.from(data['statusEvents']);
-      }
+      final currentEvents = data['statusEvents'] ?? [];
       
       // Форматируем текущее время для отображения
       final DateTime now = DateTime.now();
@@ -4624,7 +4272,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
       
       // Добавляем новое событие
       final updatedEvents = [
-        ...currentEvents,
+        ...List<dynamic>.from(currentEvents),
         {
           'status': statusText,
           'dateTime': formattedDateTime,
@@ -4632,156 +4280,12 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
         }
       ];
       
-      // Подготавливаем данные для обновления
-      Map<String, dynamic> updateData = {
+      // Обновляем статус заказа
+      await orderRef.update({
         'status': newStatus,
         'statusEvents': updatedEvents,
         'lastUpdated': FieldValue.serverTimestamp(),
-      };
-      
-      // Если статус 'принят', 'выехал', 'работает', получаем и сохраняем геолокацию инженера
-      if (newStatus == 'принят' || newStatus == 'выехал' || newStatus == 'работает' || newStatus == 'прибыл') {
-        print('Получаем геолокацию инженера для статуса: $newStatus');
-        final locationData = await _getCurrentLocation();
-        
-        if (locationData != null) {
-          // Обновляем данные с геолокацией
-          if (newStatus == 'принят') {
-            updateData['engineerLocationAtAccept'] = locationData;
-            print('Добавлена геолокация инженера при принятии заказа: $locationData');
-          } else if (newStatus == 'выехал') {
-            updateData['engineerLocationAtDeparture'] = locationData;
-            print('Добавлена геолокация инженера при выезде на заказ: $locationData');
-          } else if (newStatus == 'работает') {
-            updateData['engineerLocationAtWork'] = locationData;
-            print('Добавлена геолокация инженера при начале работы: $locationData');
-          } else if (newStatus == 'прибыл') {
-            updateData['engineerLocationAtArrival'] = locationData;
-            print('Добавлена геолокация инженера при прибытии на объект: $locationData');
-          }
-        } else {
-          print('Не удалось получить геолокацию инженера');
-        }
-      }
-      
-      // Если статус 'принят', 'выехал', 'прибыл' или 'работает', получаем и сохраняем геолокацию инженера
-      if (newStatus == 'принят' || newStatus == 'выехал' || newStatus == 'работает' || newStatus == 'прибыл') {
-        print('[ЗАКАЗ-ГЕО] Запрос на сохранение геолокации для статуса: $newStatus, ID заказа: $orderId');
-        print('[ЗАКАЗ-ГЕО] Вызываем _getCurrentLocation()');
-        final locationData = await _getCurrentLocation();
-        
-        if (locationData != null) {
-          print('[ЗАКАЗ-ГЕО] Геолокация получена успешно');
-          // Обновляем данные с геолокацией
-          if (newStatus == 'принят') {
-            updateData['engineerLocationAtAccept'] = locationData;
-            print('[ЗАКАЗ-ГЕО] Добавлена геолокация инженера при принятии заказа: $locationData');
-          } else if (newStatus == 'выехал') {
-            updateData['engineerLocationAtDeparture'] = locationData;
-            print('[ЗАКАЗ-ГЕО] Добавлена геолокация инженера при выезде на заказ: $locationData');
-          } else if (newStatus == 'прибыл') {
-            updateData['engineerLocationAtArrival'] = locationData;
-            print('[ЗАКАЗ-ГЕО] Добавлена геолокация инженера при прибытии на объект: $locationData');
-          } else if (newStatus == 'работает') {
-            updateData['engineerLocationAtWork'] = locationData;
-            print('[ЗАКАЗ-ГЕО] Добавлена геолокация инженера при начале работы: $locationData');
-          }
-        } else {
-          print('[ЗАКАЗ-ГЕО] НЕ УДАЛОСЬ получить геолокацию');
-          print('[ЗАКАЗ-ГЕО] Используем временные тестовые данные для отладки');
-          
-          // Тестовые данные для отладки (координаты центра Нижнего Новгорода)
-          final testLocationData = {
-            'latitude': 56.3269,
-            'longitude': 44.0059,
-            'accuracy': 10.0,
-            'timestamp': DateTime.now().millisecondsSinceEpoch,
-            'isTest': true, // Метка, что это тестовые данные
-          };
-          
-          if (newStatus == 'принят') {
-            updateData['engineerLocationAtAccept'] = testLocationData;
-            print('[ЗАКАЗ-ГЕО] Добавлены ТЕСТОВЫЕ данные геолокации при принятии: $testLocationData');
-          } else if (newStatus == 'выехал') {
-            updateData['engineerLocationAtDeparture'] = testLocationData;
-            print('[ЗАКАЗ-ГЕО] Добавлены ТЕСТОВЫЕ данные геолокации при выезде: $testLocationData');
-          } else if (newStatus == 'прибыл') {
-            updateData['engineerLocationAtArrival'] = testLocationData;
-            print('[ЗАКАЗ-ГЕО] Добавлены ТЕСТОВЫЕ данные геолокации при прибытии: $testLocationData');
-          } else if (newStatus == 'работает') {
-            updateData['engineerLocationAtWork'] = testLocationData;
-            print('[ЗАКАЗ-ГЕО] Добавлены ТЕСТОВЫЕ данные геолокации при начале работы: $testLocationData');
-          }
-        }
-      }
-      
-      // Обновляем статус заказа
-      print('[ЗАКАЗ-ГЕО] Отправляем запрос на обновление заказа со следующими данными:');
-      print(updateData);
-      
-      // Сначала пробуем обновить только геолокацию, если она есть
-      try {
-        // Проверяем, есть ли данные о геолокации
-        bool hasLocationData = false;
-        Map<String, dynamic> locationUpdateData = {};
-        
-        if (updateData.containsKey('engineerLocationAtAccept')) {
-          locationUpdateData['engineerLocationAtAccept'] = updateData['engineerLocationAtAccept'];
-          hasLocationData = true;
-        }
-        if (updateData.containsKey('engineerLocationAtDeparture')) {
-          locationUpdateData['engineerLocationAtDeparture'] = updateData['engineerLocationAtDeparture'];
-          hasLocationData = true;
-        }
-        if (updateData.containsKey('engineerLocationAtArrival')) {
-          locationUpdateData['engineerLocationAtArrival'] = updateData['engineerLocationAtArrival'];
-          hasLocationData = true;
-        }
-        if (updateData.containsKey('engineerLocationAtWork')) {
-          locationUpdateData['engineerLocationAtWork'] = updateData['engineerLocationAtWork'];
-          hasLocationData = true;
-        }
-        
-        // Если есть данные о геолокации, сначала обновляем только их
-        if (hasLocationData) {
-          print('[ЗАКАЗ-ГЕО] Сначала обновляем только данные о геолокации');
-          await orderRef.update(locationUpdateData);
-          print('[ЗАКАЗ-ГЕО] Геолокация успешно обновлена');
-        }
-        
-        // Затем обновляем остальные данные заказа
-        Map<String, dynamic> nonLocationData = Map.from(updateData);
-        locationUpdateData.keys.forEach((key) {
-          nonLocationData.remove(key);
-        });
-        
-        print('[ЗАКАЗ-ГЕО] Обновляем остальные данные заказа: $nonLocationData');
-        await orderRef.update(nonLocationData);
-        print('[ЗАКАЗ-ГЕО] Заказ успешно обновлен в Firestore');
-        
-        // Проверяем, что данные успешно сохранены в БД
-        final updatedOrder = await orderRef.get();
-        if (updatedOrder.exists) {
-          final updatedData = updatedOrder.data();
-          print('[ЗАКАЗ-ГЕО] Проверка данных после обновления:');
-          if (updatedData!.containsKey('engineerLocationAtAccept')) {
-            print('[ЗАКАЗ-ГЕО] engineerLocationAtAccept: ${updatedData['engineerLocationAtAccept']}');
-          }
-          if (updatedData.containsKey('engineerLocationAtDeparture')) {
-            print('[ЗАКАЗ-ГЕО] engineerLocationAtDeparture: ${updatedData['engineerLocationAtDeparture']}');
-          }
-          if (updatedData.containsKey('engineerLocationAtArrival')) {
-            print('[ЗАКАЗ-ГЕО] engineerLocationAtArrival: ${updatedData['engineerLocationAtArrival']}');
-          }
-          if (updatedData.containsKey('engineerLocationAtWork')) {
-            print('[ЗАКАЗ-ГЕО] engineerLocationAtWork: ${updatedData['engineerLocationAtWork']}');
-          }
-        }
-      } catch (e) {
-        print('[ЗАКАЗ-ГЕО] ОШИБКА при обновлении заказа: $e');
-        print(StackTrace.current);
-        rethrow; // Пробрасываем ошибку дальше для обработки в основном блоке try-catch
-      }
+      });
       
       // Определяем новый статус для локального объекта
       TaskStatus newTaskStatus;
@@ -4800,6 +4304,27 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
           break;
         case 'выполнен':
           newTaskStatus = TaskStatus.completed;
+          // Показываем модальное окно для оценки клиента
+          if (mounted) {
+            try {
+              final String orderId = activeTaskId;
+              final String clientIdForRating = data['clientId'] ?? '';
+              final String clientNameForRating = data['userName'] ?? 'Клиент';
+              
+              print('Перед вызовом диалога рейтинга: orderId=$orderId, clientId=$clientIdForRating, clientName=$clientNameForRating');
+              
+              // Добавляем небольшую задержку, чтобы убедиться, что все обновления UI завершены
+              Future.delayed(Duration(milliseconds: 500), () {
+                if (mounted) {
+                  _showRatingDialogSafe(clientIdForRating, clientNameForRating, orderId);
+                }
+              });
+            } catch (e) {
+              print('Ошибка при подготовке к показу диалога оценки клиента: $e');
+            }
+          } else {
+            print('Context не действителен, диалог оценки не будет показан');
+          }
           break;
         default:
           newTaskStatus = TaskStatus.inProgress;
@@ -4827,42 +4352,50 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
           nextAction = 'Связаться с диспетчером';
       }
       
-      // Обновляем таймлайн
-      final Map<String, String> updatedTimeline = Map<String, String>.from(existingTimeline);
-      updatedTimeline[statusText] = formattedDateTime;
-      
-      // Создаем новый экземпляр задачи
-      final EngineerTask updatedTask = EngineerTask(
-        id: orderId,
-        address: address,
-        status: newTaskStatus,
-        clientName: clientName,
-        phone: phone,
-        description: description,
-        cost: cost,
-        timeline: updatedTimeline,
-        currentAction: nextAction,
-        clientId: clientId,
-      );
-      
-      // Проверяем, что компонент всё еще есть перед обновлением состояния
-      if (!mounted) {
-        print('_updateOrderStatus: компонент не монтирован, состояние не будет обновлено');
-        return;
+      // Если виджет все еще в дереве, обновляем состояние
+      if (mounted) {
+        setState(() {
+          try {
+            // Создаем обновленный таймлайн
+            Map<String, String> updatedTimeline = {};
+            if (_activeTask != null && _activeTask!.timeline != null) {
+              updatedTimeline = Map.from(_activeTask!.timeline);
+            }
+            // Используем statusText как ключ для правильного отображения в таймлайне
+            updatedTimeline[statusText] = formattedDateTime;
+            
+            // Проверяем что _activeTask не null перед использованием
+            if (_activeTask != null) {
+              final clientId = _activeTask!.clientId; // Сохраняем clientId до обновления
+              
+              _activeTask = EngineerTask(
+                id: _activeTask!.id,
+                address: _activeTask!.address,
+                status: newTaskStatus,
+                clientName: _activeTask!.clientName,
+                phone: _activeTask!.phone,
+                description: _activeTask!.description,
+                cost: _activeTask!.cost,
+                timeline: updatedTimeline,
+                currentAction: nextAction,
+                clientId: clientId,
+              );
+              
+              print('Обновлен статус заказа: $newStatus, новый таймлайн: $updatedTimeline');
+            }
+          } catch (e) {
+            print('Ошибка при обновлении состояния: $e');
+          }
+        });
       }
       
-      // Обновляем состояние
-      setState(() {
-        _activeTask = updatedTask;
-        print('Обновлен статус заказа: $newStatus, новый таймлайн: $updatedTimeline');
-      });
-      
       // Отправка уведомления клиенту, если у нас есть ID клиента
+      final clientId = _activeTask?.clientId;
       if (clientId != null && clientId.isNotEmpty) {
         try {
-          await _sendNotificationToClient(newStatus, statusText, orderId, clientId);
+          await _sendNotificationToClient(newStatus, statusText);
         } catch (e) {
-          print('Ошибка при отправке уведомления: $e');
+          print('Ошибка при отправке уведомления клиенту: $e');
         }
       }
       
@@ -4876,7 +4409,6 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
       }
     } catch (e) {
       print('Ошибка при обновлении статуса заказа: $e');
-      print(StackTrace.current);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -4888,174 +4420,221 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
     }
   }
 
-  // Метод для отправки уведомления клиенту
-  Future<void> _sendNotificationToClient(String status, String statusText, String orderId, String clientId) async {
+  // Метод для безопасного показа диалога оценки (без исключений)
+  void _showRatingDialogSafe(String clientId, String clientName, String orderId) {
+    // Безопасный метод без async/await - просто создает и показывает диалог
     try {
-      print('Отправка уведомления клиенту $clientId о смене статуса на "$statusText"');
+      print('Вызов безопасного метода диалога оценки');
+      if (!mounted) {
+        print('Метод вызван когда виджет не в дереве (mounted = false)');
+        return;
+      }
       
-      // Создаем уведомление для клиента
-      await FirebaseFirestore.instance.collection('notifications').add({
-        'userId': clientId,
-        'type': 'order_status_updated',
-        'title': 'Статус заказа изменен',
-        'message': 'Статус вашего заказа №$orderId изменен на "$statusText"',
-        'orderId': orderId,
-        'createdAt': FieldValue.serverTimestamp(),
-        'read': false
+      // Если ID клиента не указан, не показываем диалог
+      if (clientId.isEmpty) {
+        print('ID клиента отсутствует, диалог оценки не будет показан');
+        return;
+      }
+      
+      double currentRating = 5.0; // По умолчанию 5 звезд
+      String currentReview = ''; // Текст отзыва
+      
+      print('Показываем диалог оценки через showDialog');
+      
+      // Показываем диалог через билдер (без async/await)
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            title: Text('Оценка клиента'),
+            content: StatefulBuilder(
+              builder: (BuildContext builderContext, StateSetter setInnerState) {
+                return SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('Оцените клиента $clientName'),
+                      const SizedBox(height: 20),
+                      // Звездный рейтинг
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(5, (index) {
+                          return IconButton(
+                            icon: Icon(
+                              index < currentRating ? Icons.star : Icons.star_border,
+                              color: const Color(0xFFD04E4E),
+                              size: 36,
+                            ),
+                            onPressed: () {
+                              setInnerState(() {
+                                currentRating = index + 1.0;
+                              });
+                            },
+                          );
+                        }),
+                      ),
+                      // Текст с указанием оценки
+                      Text(
+                        'Оценка: ${currentRating.toStringAsFixed(1)}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      // Поле для ввода отзыва
+                      TextField(
+                        decoration: InputDecoration(
+                          hintText: 'Напишите отзыв о клиенте (необязательно)',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        ),
+                        maxLines: 3,
+                        onChanged: (value) {
+                          currentReview = value;
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop(); // Закрыть без сохранения
+                },
+                child: const Text('Пропустить'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFD04E4E),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  try {
+                    // Сохраняем отзыв
+                    _saveClientRating(clientId, orderId, currentRating, currentReview);
+                    Navigator.of(dialogContext).pop();
+                  } catch (e) {
+                    print('Ошибка при сохранении рейтинга: $e');
+                    // Все равно закрываем диалог
+                    Navigator.of(dialogContext).pop();
+                  }
+                },
+                child: const Text('Сохранить'),
+              ),
+            ],
+          );
+        },
+      ).catchError((error) {
+        print('Ошибка при показе диалога: $error');
       });
-      
-      print('Уведомление успешно отправлено');
     } catch (e) {
-      print('Ошибка при отправке уведомления клиенту: $e');
-      print(StackTrace.current);
+      print('Критическая ошибка при показе диалога оценки: $e');
     }
   }
 
-  // Метод для отображения диалога подтверждения статуса клиентом
-  Future<bool> _showClientConfirmationDialog(String statusText) async {
-    final TextEditingController codeController = TextEditingController();
+  // Метод для сохранения оценки клиента в Firestore
+  Future<void> _saveClientRating(String clientId, String orderId, double rating, String review) async {
+    // Если ID клиента или заказа пустой, не сохраняем оценку
+    if (clientId.isEmpty || orderId.isEmpty) {
+      print('Ошибка: ID клиента или заказа пустой, оценка не будет сохранена');
+      return;
+    }
     
-    return await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Подтверждение клиента'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Для изменения статуса на "$statusText" требуется подтверждение клиента.'),
-              const SizedBox(height: 16),
-              Text('Передайте устройство клиенту или свяжитесь с ним, чтобы получить код подтверждения.'),
-              const SizedBox(height: 16),
-              // Используем TextField напрямую здесь, без декораций
-              TextField(
-                controller: codeController,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                decoration: InputDecoration(
-                  labelText: 'Код подтверждения',
-                  hintText: 'Введите 4-значный код',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text('Отмена'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Color(0xFFD04E4E),
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.of(context).pop(true),
-              child: Text('Подтвердить'),
-            ),
-          ],
-        );
-      },
-    ) ?? false;
-  }
-
-  // Получение текущей геолокации инженера
-  Future<Map<String, dynamic>?> _getCurrentLocation() async {
     try {
-      print('[ГЕОЛОКАЦИЯ] Начинаем получение геолокации инженера...');
-      // Проверяем, включены ли службы геолокации
-      bool serviceEnabled = await geo.Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        print('[ГЕОЛОКАЦИЯ] ОШИБКА: Службы геолокации отключены на устройстве');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Службы геолокации отключены. Включите их для определения местоположения.'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-        return null;
-      }
-      print('[ГЕОЛОКАЦИЯ] Службы геолокации включены');
-
-      // Проверяем разрешения на доступ к геолокации
-      print('[ГЕОЛОКАЦИЯ] Проверяем разрешения...');
-      geo.LocationPermission permission = await geo.Geolocator.checkPermission();
-      print('[ГЕОЛОКАЦИЯ] Текущее разрешение: $permission');
-      
-      if (permission == geo.LocationPermission.denied) {
-        print('[ГЕОЛОКАЦИЯ] Разрешение отклонено, запрашиваем доступ');
-        permission = await geo.Geolocator.requestPermission();
-        print('[ГЕОЛОКАЦИЯ] Результат запроса разрешения: $permission');
-        if (permission == geo.LocationPermission.denied) {
-          print('[ГЕОЛОКАЦИЯ] ОШИБКА: Разрешение на доступ к геолокации отклонено');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Разрешение на доступ к геолокации отклонено.'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-          return null;
-        }
-      }
-
-      if (permission == geo.LocationPermission.deniedForever) {
-        print('[ГЕОЛОКАЦИЯ] ОШИБКА: Разрешение на доступ к геолокации отклонено навсегда');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Разрешение на доступ к геолокации отклонено навсегда. Измените настройки приложения.'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return null;
+      // Получаем текущего пользователя
+      final user = AuthService().currentUser;
+      if (user == null) {
+        print('Ошибка: пользователь не авторизован при попытке оценить клиента');
+        return;
       }
       
-      print('[ГЕОЛОКАЦИЯ] Разрешения получены, запрашиваем текущее местоположение');
-
-      // Получаем текущее местоположение
-      print('[ГЕОЛОКАЦИЯ] Вызываем geo.Geolocator.getCurrentPosition()...');
-      geo.Position position = await geo.Geolocator.getCurrentPosition(
-        desiredAccuracy: geo.LocationAccuracy.high,
-      );
+      final String engineerId = user.uid;
+      final String engineerName = user.displayName ?? 'Инженер';
       
-      print('[ГЕОЛОКАЦИЯ] УСПЕХ! Получены координаты: ${position.latitude}, ${position.longitude}');
-      print('[ГЕОЛОКАЦИЯ] Точность: ${position.accuracy} м');
-      print('[ГЕОЛОКАЦИЯ] Типы данных: lat=${position.latitude.runtimeType}, lng=${position.longitude.runtimeType}, acc=${position.accuracy.runtimeType}');
+      print('Сохранение оценки клиента: ID=$clientId, оценка=$rating, отзыв: "$review"');
       
-      // Явно преобразуем типы для гарантии совместимости с Firestore
-      double latitude = position.latitude;
-      double longitude = position.longitude;
-      double accuracy = position.accuracy;
+      // Создаем документ отзыва
+      await FirebaseFirestore.instance.collection('client_reviews').add({
+        'clientId': clientId,
+        'orderId': orderId,
+        'engineerId': engineerId,
+        'engineerName': engineerName,
+        'rating': rating,
+        'review': review,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
       
-      // Возвращаем координаты в виде Map для сохранения в Firestore
-      final locationData = {
-        'latitude': latitude,
-        'longitude': longitude,
-        'accuracy': accuracy,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      };
+      // Обновляем средний рейтинг клиента
+      await _updateClientAverageRating(clientId);
       
-      print('[ГЕОЛОКАЦИЯ] Подготовлены данные для записи: $locationData');
-      return locationData;
+      if (mounted) {  // Проверяем, что виджет все еще в дереве
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Отзыв успешно сохранен'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
-      print('[ГЕОЛОКАЦИЯ] КРИТИЧЕСКАЯ ОШИБКА при получении местоположения: $e');
-      print('[ГЕОЛОКАЦИЯ] Стек ошибки:');
-      print(StackTrace.current);
-      if (mounted) {
+      print('Ошибка при сохранении оценки клиента: $e');
+      if (mounted) {  // Проверяем, что виджет все еще в дереве
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Ошибка при получении местоположения: $e'),
+            content: Text('Ошибка при сохранении отзыва: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
-      return null;
+    }
+  }
+  
+  // Метод для обновления среднего рейтинга клиента
+  Future<void> _updateClientAverageRating(String clientId) async {
+    try {
+      // Получаем все отзывы клиента
+      final reviewsSnapshot = await FirebaseFirestore.instance
+          .collection('client_reviews')
+          .where('clientId', isEqualTo: clientId)
+          .get();
+      
+      // Если отзывов нет, выходим
+      if (reviewsSnapshot.docs.isEmpty) {
+        print('Отзывов для клиента с ID=$clientId не найдено');
+        return;
+      }
+      
+      // Вычисляем средний рейтинг
+      double totalRating = 0;
+      int reviewCount = 0;
+      
+      for (var doc in reviewsSnapshot.docs) {
+        final data = doc.data();
+        if (data['rating'] is num) {
+          totalRating += (data['rating'] as num).toDouble();
+          reviewCount++;
+        }
+      }
+      
+      double averageRating = reviewCount > 0 ? totalRating / reviewCount : 0;
+      
+      print('Обновление среднего рейтинга клиента: ID=$clientId, средний рейтинг=$averageRating из $reviewCount отзывов');
+      
+      // Обновляем данные пользователя
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(clientId)
+          .update({
+            'rating': averageRating,
+            'reviewCount': reviewCount,
+          });
+    } catch (e) {
+      print('Ошибка при обновлении среднего рейтинга клиента: $e');
     }
   }
 
@@ -5220,6 +4799,165 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
       ),
     );
   }
+
+  // Метод для проверки правильности перехода между статусами
+  bool _isValidStatusTransition(String currentStatus, String newStatus) {
+    // Массив допустимых переходов между статусами
+    final Map<String, List<String>> validTransitions = {
+      'создан': ['принят', 'отклонен'],
+      'принят': ['выехал', 'отменен'],
+      'выехал': ['прибыл', 'отменен'],
+      'прибыл': ['работает', 'отменен'],
+      'работает': ['выполнен', 'отменен'],
+      'выполнен': [], // Из выполнен никуда не переходим
+      'отменен': [], // Из отменен никуда не переходим
+      'отклонен': [], // Из отклонен никуда не переходим
+    };
+    
+    // Если текущий статус пустой, считаем что можно перейти в любой статус
+    if (currentStatus.isEmpty) {
+      return true;
+    }
+    
+    // Если такого статуса нет в списке переходов, разрешаем любой переход
+    if (!validTransitions.containsKey(currentStatus)) {
+      return true;
+    }
+    
+    // Проверяем, есть ли новый статус в списке допустимых переходов
+    return validTransitions[currentStatus]!.contains(newStatus);
+  }
+  
+  // Метод для отправки уведомления клиенту
+  Future<void> _sendNotificationToClient(String status, String statusText) async {
+    try {
+      // Безопасно получаем необходимые данные
+      final String? clientId = _activeTask?.clientId;
+      final String orderId = _activeTask?.id ?? '';
+      
+      // Проверяем, что у нас есть необходимые данные
+      if (clientId == null || clientId.isEmpty || orderId.isEmpty) {
+        print('Не удалось отправить уведомление: отсутствует ID клиента или заказа');
+        return;
+      }
+      
+      print('Отправка уведомления клиенту: id=$clientId, orderId=$orderId, status=$statusText');
+      
+      // Создаем уведомление для клиента
+      await FirebaseFirestore.instance.collection('notifications').add({
+        'userId': clientId,
+        'type': 'order_status_updated',
+        'title': 'Статус заказа изменен',
+        'message': 'Статус вашего заказа №$orderId изменен на "$statusText"',
+        'orderId': orderId,
+        'createdAt': FieldValue.serverTimestamp(),
+        'read': false
+      });
+      
+      print('Уведомление успешно отправлено');
+    } catch (e) {
+      print('Ошибка при отправке уведомления клиенту: $e');
+    }
+  }
+  
+  // Метод для обновления среднего рейтинга клиента
+  Future<void> _updateClientAverageRating(String clientId) async {
+    try {
+      // Получаем все отзывы о клиенте
+      final reviewsSnapshot = await FirebaseFirestore.instance
+          .collection('client_reviews')
+          .where('clientId', isEqualTo: clientId)
+          .get();
+      
+      if (reviewsSnapshot.docs.isEmpty) {
+        print('Отзывов о клиенте не найдено, рейтинг не будет обновлен');
+        return;
+      }
+      
+      // Вычисляем средний рейтинг
+      double totalRating = 0;
+      final reviewCount = reviewsSnapshot.docs.length;
+      
+      for (var doc in reviewsSnapshot.docs) {
+        totalRating += (doc.data()['rating'] as num).toDouble();
+      }
+      
+      final averageRating = totalRating / reviewCount;
+      
+      print('Обновление среднего рейтинга клиента: id=$clientId, средний рейтинг=$averageRating, количество отзывов=$reviewCount');
+      
+      // Обновляем данные клиента
+      await FirebaseFirestore.instance.collection('users').doc(clientId).update({
+        'averageRating': averageRating,
+        'reviewCount': reviewCount,
+      });
+      
+      print('Средний рейтинг клиента успешно обновлен');
+    } catch (e) {
+      print('Ошибка при обновлении среднего рейтинга клиента: $e');
+    }
+  }
+
+  // Метод для отображения диалога подтверждения статуса клиентом
+  Future<bool> _showClientConfirmationDialog(String statusText) async {
+    final TextEditingController codeController = TextEditingController();
+    
+    try {
+      if (!mounted) {
+        print('_showClientConfirmationDialog: Context не действителен');
+        return false;
+      }
+      
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: Text('Подтверждение клиента'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Для изменения статуса на "$statusText" требуется подтверждение клиента.'),
+                const SizedBox(height: 16),
+                Text('Передайте устройство клиенту или свяжитесь с ним, чтобы получить код подтверждения.'),
+                const SizedBox(height: 16),
+                // Используем TextField напрямую здесь, без декораций
+                TextField(
+                  controller: codeController,
+                  keyboardType: TextInputType.number,
+                  maxLength: 4,
+                  decoration: InputDecoration(
+                    labelText: 'Код подтверждения',
+                    hintText: 'Введите 4-значный код',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text('Отмена'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Color(0xFFD04E4E),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text('Подтвердить'),
+              ),
+            ],
+          );
+        },
+      );
+      
+      return result ?? false;
+    } catch (e) {
+      print('Ошибка при показе диалога подтверждения клиента: $e');
+      return false;
+    }
+  }
 }
 
 // Модель задания инженера
@@ -5293,11 +5031,6 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
   DateTime? _createdAt;
   int _activity = 0;
   double _rating = 0.0;
-  int _ratingCount = 0;
-  
-  // Список отзывов о инженере
-  List<Map<String, dynamic>> _reviews = [];
-  bool _isLoadingReviews = false;
   
   // Переменные для отображения всплывающего уведомления
   bool _showNotification = false;
@@ -5309,7 +5042,6 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
   void initState() {
     super.initState();
     _loadUserData();
-    _loadUserReviews();
   }
   
   @override
@@ -5369,7 +5101,6 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
             
             // Загружаем данные рейтинга
             final rating = userData['rating'];
-            final ratingCount = userData['ratingCount'] ?? 0;
             
             // Получаем общее количество заказов инженера (активность)
             int totalOrders = 0;
@@ -5444,7 +5175,6 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
                 // Устанавливаем значения активности и рейтинга
                 _activity = totalOrders;
                 _rating = rating is num ? rating.toDouble() : 0.0;
-                _ratingCount = ratingCount is num ? ratingCount.toInt() : 0;
               });
             }
           }
@@ -5461,113 +5191,6 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
     }
   }
   
-  // Метод для загрузки отзывов об инженере
-  Future<void> _loadUserReviews() async {
-    if (!mounted) return;
-    
-    setState(() {
-      _isLoadingReviews = true;
-    });
-    
-    try {
-      final user = AuthService().currentUser;
-      if (user == null) {
-        setState(() {
-          _isLoadingReviews = false;
-          _reviews = [];
-        });
-        return;
-      }
-      
-      print('Загрузка отзывов для инженера с ID: ${user.uid}');
-      
-      // Получаем отзывы, оставленные клиентами для этого инженера
-      final reviewsSnapshot = await FirebaseFirestore.instance
-          .collection('reviews')
-          .where('engineerId', isEqualTo: user.uid)
-          .where('type', isEqualTo: 'client_to_engineer')
-          .orderBy('createdAt', descending: true)
-          .get();
-          
-      print('Найдено отзывов: ${reviewsSnapshot.docs.length}');
-      
-      final reviews = reviewsSnapshot.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'id': doc.id,
-          'clientName': data['clientName'] ?? 'Неизвестный клиент',
-          'rating': data['rating'] ?? 0,
-          'comment': data['comment'] ?? '',
-          'createdAt': data['createdAt']?.toDate() ?? DateTime.now(),
-        };
-      }).toList();
-      
-      // Если нужно, обновляем рейтинг инженера на основе полученных отзывов
-      _updateEngineerRating(reviews);
-      
-      if (mounted) {
-        setState(() {
-          _reviews = reviews;
-          _isLoadingReviews = false;
-        });
-      }
-    } catch (e) {
-      print('Ошибка при загрузке отзывов: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingReviews = false;
-        });
-      }
-    }
-  }
-
-  // Метод для обновления рейтинга инженера
-  Future<void> _updateEngineerRating(List<Map<String, dynamic>> reviews) async {
-    try {
-      if (reviews.isEmpty) return;
-      
-      // Вычисляем средний рейтинг
-      double totalRating = 0;
-      int count = 0;
-      
-      for (final review in reviews) {
-        final rating = review['rating'] as int?;
-        if (rating != null) {
-          totalRating += rating;
-          count++;
-        }
-      }
-      
-      if (count > 0) {
-        final averageRating = totalRating / count;
-        
-        final user = AuthService().currentUser;
-        if (user != null) {
-          // Обновляем рейтинг в Firestore
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(user.uid)
-              .update({
-                'rating': averageRating,
-                'ratingCount': count,
-              });
-          
-          // Обновляем локальное состояние
-          if (mounted) {
-            setState(() {
-              _rating = averageRating;
-              _ratingCount = count;
-            });
-          }
-          
-          print('Обновлен рейтинг инженера: $averageRating ($count отзывов)');
-        }
-      }
-    } catch (e) {
-      print('Ошибка при обновлении рейтинга инженера: $e');
-    }
-  }
-
   // Метод для выбора изображения из галереи
   Future<void> _pickImage() async {
     try {
@@ -5888,9 +5511,7 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
                               children: [
                                 Expanded(
                                   child: _buildStatCard(
-                                    _ratingCount > 0 
-                                        ? "${_rating.toStringAsFixed(1)} (${_ratingCount})"
-                                        : "Нет отзывов",
+                                    _rating.toStringAsFixed(2),
                                     'Рейтинг'
                                   ),
                                 ),
@@ -5928,60 +5549,42 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
                             const SizedBox(height: 16),
                             
                             // Отзывы заголовок
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text(
-                                    'Отзывы',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 18,
-                                    ),
-                                  ),
-                                  if (_reviews.isNotEmpty)
-                                    Text(
-                                      'Всего: ${_reviews.length}',
-                                      style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                ],
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 8),
+                              child: Text(
+                                'Отзывы',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
+                                ),
                               ),
                             ),
                             
                             const SizedBox(height: 12),
                             
                             // Отзывы карточки
-                            _isLoadingReviews
-                              ? const Center(
-                                  child: Padding(
-                                    padding: EdgeInsets.all(16.0),
-                                    child: CircularProgressIndicator(color: Colors.red),
-                                  ),
-                                )
-                              : _reviews.isEmpty
-                                ? _buildEmptyReviewsMessage()
-                                : Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                                    child: Wrap(
-                                      spacing: 12,
-                                      runSpacing: 12,
-                                      children: [
-                                        for (int i = 0; i < _reviews.length.clamp(0, 10); i++)
-                                          SizedBox(
-                                            width: MediaQuery.of(context).size.width / 2 - 20,
-                                            child: _buildReviewCard(
-                                              _reviews[i]['clientName'],
-                                              _reviews[i]['comment'],
-                                              _reviews[i]['rating'],
-                                            ),
-                                          ),
-                                      ],
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: _buildReviewCard(
+                                      'Тарас Романов',
+                                      'Всё сделано супер, буду рекомендовать вас!',
+                                      5,
                                     ),
                                   ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: _buildReviewCard(
+                                      'Вадим Романов',
+                                      'Отличный сервис, быстро договорились и все сделали',
+                                      5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                             
                             const SizedBox(height: 70), // Место для навигационной панели
                           ],
@@ -6225,47 +5828,6 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
               }
             },
             child: const Text('Сохранить'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Сообщение, если нет отзывов
-  Widget _buildEmptyReviewsMessage() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: BoxDecoration(
-        color: Colors.grey[200],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            Icons.rate_review_outlined,
-            size: 48,
-            color: Colors.grey[400],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'У вас пока нет отзывов',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: Colors.grey,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Отзывы появятся после выполнения заказов',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-            ),
-            textAlign: TextAlign.center,
           ),
         ],
       ),

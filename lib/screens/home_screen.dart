@@ -67,7 +67,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   List<Map<String, dynamic>> _services = [];
   
   // Список категорий услуг
-  late List<String> _categories;
+  List<String> _categories = [];
 
   // Переменные для хранения данных карты при выборе оплаты картой
   final TextEditingController _cardNumberController = TextEditingController();
@@ -1038,19 +1038,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     required String description,
     required List<String> features,
   }) {
-    // Очищаем контроллеры для карты
-    _cardNumberController.clear();
-    _cardExpiryController.clear();
-    _cardCvcController.clear();
-    _cardHolderController.clear();
-    
-    // Контроллеры для данных пользователя не очищаем, так как они должны быть предзаполнены
-    
     // Очищаем контроллер для дополнительной информации
     _additionalInfoController.clear();
     
     // Переменная для хранения выбранного способа оплаты
-    String _selectedPaymentMethod = 'card';
+    String _selectedPaymentMethod = 'qr';
     
     // Переменная для отслеживания состояния описания (свернуто/развернуто)
     bool _isDescriptionExpanded = false;
@@ -1081,18 +1073,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             _userPhoneController.text.isNotEmpty && 
                             _userPhoneController.text.length >= 10;
       
-      // По умолчанию форма невалидна
+      // По умолчанию форма валидна, если адрес и данные пользователя заполнены
       bool isValid = isAddressValid && isUserDataValid;
-      
-      // Проверяем данные карты, если выбран способ оплаты картой
-      if (_selectedPaymentMethod == 'card') {
-        bool isCardValid = _cardNumberController.text.length >= 16 && // Номер карты должен быть не менее 16 символов
-                          _cardExpiryController.text.length >= 5 &&   // Формат MM/YY
-                          _cardCvcController.text.length >= 3 &&      // CVC/CVV минимум 3 цифры
-                          _cardHolderController.text.isNotEmpty;     // Имя владельца должно быть заполнено
-        
-        isValid = isValid && isCardValid;
-      }
       
       // Обновляем статус валидности формы
       setState(() {
@@ -1519,20 +1501,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               ),
                               const SizedBox(height: 16),
                               _buildPaymentOption(
-                                title: "Оплата картой",
-                                subtitle: "Visa, MasterCard, МИР",
-                                icon: Icons.credit_card,
-                                value: "card",
-                                groupValue: _selectedPaymentMethod,
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedPaymentMethod = value!;
-                                    _validateForm(setState);
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 12),
-                              _buildPaymentOption(
                                 title: "Оплата по QR-коду",
                                 subtitle: "СБП, Система быстрых платежей",
                                 icon: Icons.qr_code,
@@ -1576,15 +1544,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                       ),
                                     );
                                   },
-                                  child: _selectedPaymentMethod == 'card'
-                                      ? _buildCardPaymentForm(onChanged: () {
-                                          // Вызываем валидацию при изменении данных карты
-                                          if (stateSetter != null) {
-                                            _validateForm(stateSetter);
-                                          }
-                                        })
-                                      : _selectedPaymentMethod == 'qr'
-                                          ? _buildQrPaymentWidget(
+                                  child: _selectedPaymentMethod == 'qr'
+                                      ? _buildQrPaymentWidget(
+                                          context: context,
+                                          title: title,
+                                          price: price,
+                                          currency: currency,
+                                          description: description,
+                                          address: _currentAddress,
+                                          additionalInfo: _additionalInfoController.text,
+                                          paymentMethod: _selectedPaymentMethod,
+                                          isEnabled: _isFormValid,
+                                        )
+                                      : _selectedPaymentMethod == 'cash'
+                                          ? _buildCashPaymentWidget(
                                               context: context,
                                               title: title,
                                               price: price,
@@ -1592,21 +1565,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                               description: description,
                                               address: _currentAddress,
                                               additionalInfo: _additionalInfoController.text,
-                                              paymentMethod: _selectedPaymentMethod,
                                               isEnabled: _isFormValid,
                                             )
-                                          : _selectedPaymentMethod == 'cash'
-                                              ? _buildCashPaymentWidget(
-                                                  context: context,
-                                                  title: title,
-                                                  price: price,
-                                                  currency: currency,
-                                                  description: description,
-                                                  address: _currentAddress,
-                                                  additionalInfo: _additionalInfoController.text,
-                                                  isEnabled: _isFormValid,
-                                                )
-                                              : const SizedBox.shrink(),
+                                          : const SizedBox.shrink(),
                                 ),
                               ),
                             ],

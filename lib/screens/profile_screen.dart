@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'dart:async';
+import 'settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -501,10 +502,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         // Иконка настроек SVG без серого фона
-                        SvgPicture.asset(
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context, 
+                              MaterialPageRoute(builder: (context) => const SettingsScreen())
+                            );
+                          },
+                          child: SvgPicture.asset(
                           'lib/assets/Frame.svg',
                           width: 30,
                           height: 30,
+                          ),
                         ),
                         // Иконка выхода без серого фона
                         IconButton(
@@ -758,43 +767,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildReviewsSection(),
                     
                     const SizedBox(height: 20),
-                    
-                    // Кнопка выхода
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () async {
-                          try {
-                            await AuthService().signOut();
-                            if (context.mounted) {
-                              Navigator.pushReplacementNamed(context, '/login');
-                            }
-                          } catch (e) {
-                            print('Ошибка при выходе: $e');
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Ошибка при выходе: $e'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                            }
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text(
-                          'Выйти из аккаунта',
-                          style: TextStyle(fontSize: 16),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'auth_service.dart';
 
+// Добавляем константу для шрифта
+const String fontFamily = 'Montserrat';
+
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
 
@@ -108,6 +111,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               fontSize: 12,
                               color: Colors.red,
                               fontWeight: FontWeight.w500,
+                              fontFamily: fontFamily,
                             ),
                           ),
                           const SizedBox(height: 10),
@@ -117,6 +121,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
                               color: Colors.red,
+                              fontFamily: fontFamily,
                             ),
                           ),
                         ],
@@ -130,6 +135,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.red,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: fontFamily,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -138,7 +145,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       decoration: InputDecoration(
                         hintText: 'Введите email',
                         hintStyle: TextStyle(
-                          color: Colors.grey[400],
+                          color: Colors.grey[600],
+                          fontFamily: fontFamily,
                         ),
                         filled: false,
                         enabledBorder: OutlineInputBorder(
@@ -151,7 +159,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       ),
-                      style: const TextStyle(color: Colors.black87),
+                      style: const TextStyle(
+                        color: Colors.black87,
+                        fontFamily: fontFamily,
+                      ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Введите email';
@@ -171,6 +182,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.red,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: fontFamily,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -180,7 +193,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       decoration: InputDecoration(
                         hintText: 'Введите пароль',
                         hintStyle: TextStyle(
-                          color: Colors.grey[400],
+                          color: Colors.grey[600],
+                          fontFamily: fontFamily,
                         ),
                         filled: false,
                         enabledBorder: OutlineInputBorder(
@@ -193,7 +207,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       ),
-                      style: const TextStyle(color: Colors.black87),
+                      style: const TextStyle(
+                        color: Colors.black87,
+                        fontFamily: fontFamily,
+                      ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Введите пароль';
@@ -213,6 +230,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.red,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: fontFamily,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -222,7 +241,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       decoration: InputDecoration(
                         hintText: 'Повторите пароль',
                         hintStyle: TextStyle(
-                          color: Colors.grey[400],
+                          color: Colors.grey[600],
+                          fontFamily: fontFamily,
                         ),
                         filled: false,
                         enabledBorder: OutlineInputBorder(
@@ -235,7 +255,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       ),
-                      style: const TextStyle(color: Colors.black87),
+                      style: const TextStyle(
+                        color: Colors.black87,
+                        fontFamily: fontFamily,
+                      ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Подтвердите пароль';
@@ -252,7 +275,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         padding: const EdgeInsets.only(top: 16),
                         child: Text(
                           _error,
-                          style: const TextStyle(color: Colors.red),
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontFamily: fontFamily,
+                          ),
                         ),
                       ),
                     
@@ -277,6 +303,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
+                            fontFamily: fontFamily,
                           ),
                         ),
                       ),
@@ -292,7 +319,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           Navigator.pop(context);
                         },
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.red, width: 1.0),
+                          side: const BorderSide(color: Colors.red, width: 2.0),
                           foregroundColor: Colors.red,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
@@ -304,6 +331,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           'Войти',
                           style: TextStyle(
                             fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: fontFamily,
                           ),
                         ),
                       ),

@@ -372,13 +372,6 @@ class _HistoryScreenState extends State<HistoryScreen> with TickerProviderStateM
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
-          'История заказов',
-          style: TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
         actions: [
           // Кнопка для открытия меню с выполненными и отмененными заказами
           IconButton(

@@ -598,8 +598,8 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                                 dataSource: _generateChartData(),
                                 xValueMapper: (_ChartData data, _) => data.category,
                                 yValueMapper: (_ChartData data, _) => data.amount,
-                                innerRadius: '70%',
-                                radius: '90%',
+                                innerRadius: '85%',
+                                radius: '60%',
                                 cornerStyle: CornerStyle.bothCurve,
                                 pointColorMapper: (_ChartData data, _) => categoryColors[data.category] ?? Colors.grey,
                                 dataLabelMapper: (_ChartData data, _) {
@@ -624,7 +624,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                                 widget: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(_totalAmount.toStringAsFixed(0), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                                    Text(_totalAmount.toStringAsFixed(0), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                                     const Text('₽', style: TextStyle(fontSize: 12, color: Colors.black54)),
                                   ],
                                 ),
@@ -694,7 +694,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFFF0ED),
+                        color: const Color(0xFF2D2D2D),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: const Color(0xFFD04E4E).withOpacity(0.3))
                       ),
@@ -877,7 +877,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
           Icon(
             icon,
             size: 16,
-            color: Colors.grey[600],
+            color: Colors.grey[400],
           ),
           const SizedBox(width: 8),
           SizedBox(
@@ -886,7 +886,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
               label,
               style: TextStyle(
                 fontSize: 13,
-                color: Colors.grey[700],
+                color: Colors.grey[400],
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -896,7 +896,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
               value,
               style: TextStyle(
                 fontSize: 13,
-                color: textColor ?? Colors.black87,
+                color: textColor ?? Colors.white,
                 fontWeight: FontWeight.w400,
               ),
               overflow: TextOverflow.visible,
@@ -924,7 +924,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                             borderRadius: BorderRadius.circular(12),
                           ),
                           elevation: 0,
-                          color: const Color(0xFFFFF0ED),
+                          color: const Color(0xFF2D2D2D),
                           child: InkWell(
                             onTap: () => _toggleCardExpanded(order.id),
                             borderRadius: BorderRadius.circular(12),
@@ -963,6 +963,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                                             style: const TextStyle(
                                               fontSize: 15,
                                               fontWeight: FontWeight.w600,
+                                              color: Colors.white,
                             ),
                             overflow: TextOverflow.ellipsis,
                                             ),
@@ -977,7 +978,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                                             style: TextStyle(
                                               fontSize: 15,
                                               fontWeight: FontWeight.w600,
-                          color: categoryColor,
+                          color: Colors.white,
                                             ),
                                           ),
                                           const SizedBox(width: 6),
@@ -1003,7 +1004,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
                                         '${order.date.day}.${order.date.month}.${order.date.year}',
                                         style: TextStyle(
                                           fontSize: 12,
-                                          color: Colors.grey[600],
+                                          color: Colors.grey[400],
                                         ),
                                       ),
                                     ),
@@ -1425,7 +1426,7 @@ class _EngineerIncomeScreenState extends State<EngineerIncomeScreen> with Single
       print('Запрашиваем категорию с ID $categoryId напрямую из Firestore');
       
       final categoryDoc = await FirebaseFirestore.instance
-          .collection('service_categories')  // Исправлено: было services_categories
+          .collection('services_categories')  // Исправлено: было services_categories
           .doc(categoryId)
           .get();
       
@@ -3752,21 +3753,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
           Padding(
                   padding: const EdgeInsets.only(top: 12),
             child: Center(
-              child: TextButton(
-                onPressed: () {
-                  // Логика отмены заказа
-                },
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.grey,
-                      ),
-                child: const Text(
-                  'Отменить заказ',
-                  style: TextStyle(
-                    color: Colors.grey,
-                    decoration: TextDecoration.underline,
-                  ),
-                ),
-              ),
+
             ),
           ),
             ],
@@ -4049,7 +4036,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
                   onPressed: isLoading ? null : () {
                     Navigator.of(context).pop(false);
                   },
-                  child: const Text('Отмена'),
+                  child: const Text('Отмена', style: TextStyle(color: Colors.white)),
                 ),
                 ElevatedButton(
                   onPressed: isLoading ? null : () async {
@@ -4090,6 +4077,7 @@ class _EngineerTasksScreenState extends State<EngineerTasksScreen> {
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFD04E4E),
+                    foregroundColor: Colors.white,
                   ),
                   child: const Text('Подтвердить'),
                 ),
@@ -5750,7 +5738,7 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
                                 ),
                                 // Кнопка выхода
                                 IconButton(
-                                  icon: const Icon(Icons.arrow_forward, color: Colors.red),
+                                  icon: const Icon(Icons.logout, color: Colors.red),
                                   onPressed: () async {
                                     try {
                                       await AuthService().signOut();
@@ -5964,22 +5952,57 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
                                 )
                               : _reviews.isEmpty
                                 ? _buildEmptyReviewsMessage()
-                                : Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                                    child: Wrap(
-                                      spacing: 12,
-                                      runSpacing: 12,
-                                      children: [
-                                        for (int i = 0; i < _reviews.length.clamp(0, 10); i++)
-                                          SizedBox(
-                                            width: MediaQuery.of(context).size.width / 2 - 20,
-                                            child: _buildReviewCard(
-                                              _reviews[i]['clientName'],
-                                              _reviews[i]['comment'],
-                                              _reviews[i]['rating'],
-                                            ),
+                                : Container(
+                                    height: 250, // Высота для двух строк отзывов
+                                    child: ListView.builder(
+                                      scrollDirection: Axis.horizontal,
+                                      itemCount: _reviews.length,
+                                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                                      itemBuilder: (context, index) {
+                                        return Container(
+                                          width: MediaQuery.of(context).size.width * 0.8,
+                                          margin: const EdgeInsets.only(right: 12),
+                                          child: Column(
+                                            children: [
+                                              // Верхний отзыв
+                                              Expanded(
+                                                child: _buildReviewCard(
+                                                  _reviews[index]['clientName'],
+                                                  _reviews[index]['comment'],
+                                                  _reviews[index]['rating'],
+                                                ),
+                                              ),
+                                              const SizedBox(height: 10),
+                                              // Нижний отзыв (если есть достаточно отзывов)
+                                              Expanded(
+                                                child: _reviews.length > index + 1
+                                                  ? _buildReviewCard(
+                                                      _reviews[(index + _reviews.length/2).floor() % _reviews.length]['clientName'],
+                                                      _reviews[(index + _reviews.length/2).floor() % _reviews.length]['comment'],
+                                                      _reviews[(index + _reviews.length/2).floor() % _reviews.length]['rating'],
+                                                    )
+                                                  : Container(
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.black.withOpacity(0.3),
+                                                        borderRadius: BorderRadius.circular(12),
+                                                        border: Border.all(color: Colors.grey[800]!, width: 1),
+                                                      ),
+                                                      child: Center(
+                                                        child: Text(
+                                                          'Больше отзывов пока нет',
+                                                          style: TextStyle(
+                                                            color: Colors.grey[400],
+                                                            fontSize: 12,
+                                                          ),
+                                                          textAlign: TextAlign.center,
+                                                        ),
+                                                      ),
+                                                    ),
+                                              ),
+                                            ],
                                           ),
-                                      ],
+                                        );
+                                      },
                                     ),
                                   ),
                             
@@ -6101,25 +6124,41 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
   // Карточка отзыва
   Widget _buildReviewCard(String name, String text, int rating) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.black,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 24,
-                height: 24,
-                decoration: const BoxDecoration(
-                  color: Colors.grey,
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.grey[700],
                   shape: BoxShape.circle,
+                  border: Border.all(color: Colors.amber, width: 2),
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.person,
+                    color: Colors.white,
+                    size: 20,
+                  ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -6128,18 +6167,19 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
                       name,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 12,
+                        fontSize: 14,
                         fontWeight: FontWeight.bold,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
+                    const SizedBox(height: 4),
                     Row(
                       children: List.generate(
                         5,
                         (index) => Icon(
                           Icons.star,
-                          color: index < rating ? Colors.yellow : Colors.grey,
-                          size: 12,
+                          color: index < rating ? Colors.amber : Colors.grey[700],
+                          size: 16,
                         ),
                       ),
                     ),
@@ -6148,15 +6188,19 @@ class _EngineerProfileScreenState extends State<EngineerProfileScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            text,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(
+              text,
+              style: TextStyle(
+                color: Colors.grey[300],
+                fontSize: 13,
+                height: 1.3,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),

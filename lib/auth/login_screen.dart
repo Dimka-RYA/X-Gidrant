@@ -3,6 +3,9 @@ import 'auth_service.dart';
 import 'register_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// Добавляем константу для шрифта
+const String fontFamily = 'Montserrat';
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -138,6 +141,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               fontSize: 12,
                               color: Colors.red,
                               fontWeight: FontWeight.w500,
+                              fontFamily: fontFamily,
                             ),
                           ),
                           const SizedBox(height: 10),
@@ -147,6 +151,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               fontSize: 24,
                               fontWeight: FontWeight.bold,
                               color: Colors.red,
+                              fontFamily: fontFamily,
                             ),
                           ),
                         ],
@@ -160,6 +165,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.red,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: fontFamily,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -168,7 +175,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       decoration: InputDecoration(
                         hintText: 'Введите email',
                         hintStyle: TextStyle(
-                          color: Colors.grey[400],
+                          color: Colors.grey[600],
+                          fontFamily: fontFamily,
                         ),
                         filled: false,
                         enabledBorder: OutlineInputBorder(
@@ -181,7 +189,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       ),
-                      style: const TextStyle(color: Colors.black87),
+                      style: const TextStyle(
+                        color: Colors.black87,
+                        fontFamily: fontFamily,
+                      ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Введите email';
@@ -198,6 +209,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.red,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: fontFamily,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -207,7 +220,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       decoration: InputDecoration(
                         hintText: 'Введите пароль',
                         hintStyle: TextStyle(
-                          color: Colors.grey[400],
+                          color: Colors.grey[600],
+                          fontFamily: fontFamily,
                         ),
                         filled: false,
                         enabledBorder: OutlineInputBorder(
@@ -220,7 +234,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       ),
-                      style: const TextStyle(color: Colors.black87),
+                      style: const TextStyle(
+                        color: Colors.black87,
+                        fontFamily: fontFamily,
+                      ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Введите пароль';
@@ -234,7 +251,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         padding: const EdgeInsets.only(top: 16),
                         child: Text(
                           _error,
-                          style: const TextStyle(color: Colors.red),
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontFamily: fontFamily,
+                          ),
                         ),
                       ),
                     
@@ -302,7 +322,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               } else {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text('Неверный email или пароль'),
+                                    content: Text(
+                                      'Неверный email или пароль',
+                                      style: TextStyle(fontFamily: fontFamily),
+                                    ),
                                     backgroundColor: Colors.red,
                                   ),
                                 );
@@ -313,7 +336,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               print('Ошибка входа: $e');
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text('Ошибка: ${e.toString()}'),
+                                  content: Text(
+                                    'Ошибка: ${e.toString()}',
+                                    style: const TextStyle(fontFamily: fontFamily),
+                                  ),
                                   backgroundColor: Colors.red,
                                 ),
                               );
@@ -340,6 +366,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
+                            fontFamily: fontFamily,
                           ),
                         ),
                       ),
@@ -360,7 +387,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           );
                         },
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.red, width: 1.0),
+                          side: const BorderSide(color: Colors.red, width: 2.0),
                           foregroundColor: Colors.red,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
@@ -372,6 +399,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           'Зарегистрироваться',
                           style: TextStyle(
                             fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: fontFamily,
                           ),
                         ),
                       ),

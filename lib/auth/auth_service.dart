@@ -250,6 +250,34 @@ class AuthService {
     }
   }
   
+  // Метод для смены пароля пользователя
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    try {
+      final user = _auth.currentUser;
+      
+      if (user != null && user.email != null) {
+        // Создаем учетные данные для повторной аутентификации
+        AuthCredential credential = EmailAuthProvider.credential(
+          email: user.email!,
+          password: currentPassword,
+        );
+        
+        // Повторно аутентифицируем пользователя
+        await user.reauthenticateWithCredential(credential);
+        
+        // Меняем пароль
+        await user.updatePassword(newPassword);
+        
+        print('Пароль успешно изменен');
+      } else {
+        throw Exception('Пользователь не авторизован');
+      }
+    } catch (e) {
+      print('Ошибка при смене пароля: $e');
+      rethrow; // Пробрасываем ошибку дальше для обработки в UI
+    }
+  }
+  
   // Выход из аккаунта
   Future<void> signOut() async {
     try {
